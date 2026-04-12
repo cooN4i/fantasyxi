@@ -9,6 +9,7 @@ asyncio==4.0.0
 attrs==25.4.0
 blinker==1.9.0
 certifi==2026.2.25
+cffi==2.0.0
 charset-normalizer==3.4.7
 click==8.3.2
 colorama==0.4.6
@@ -16,6 +17,9 @@ et_xmlfile==2.0.0
 Flask==2.3.3
 flask-cors==6.0.2
 frozenlist==1.8.0
+gevent==26.4.0
+greenlet==3.4.0
+gunicorn==25.3.0
 idna==3.11
 itsdangerous==2.2.0
 Jinja2==3.1.6
@@ -24,8 +28,10 @@ MarkupSafe==3.0.3
 multidict==6.7.1
 numpy==2.4.3
 openpyxl==3.1.5
+packaging==26.0
 pandas==3.0.1
 propcache==0.4.1
+pycparser==3.0
 pydantic==2.12.5
 pydantic_core==2.41.5
 pyTelegramBotAPI==4.20.0
@@ -40,3 +46,5 @@ tzdata==2025.3
 urllib3==2.6.3
 Werkzeug==3.1.8
 yarl==1.23.0
+zope.event==6.1
+zope.interface==8.3
