@@ -45,11 +45,13 @@ jobs:
           pip install -r requirements.txt --no-cache-dir
           
           echo "Restarting service..."
+
+          sudo systemctl daemon-reload
           sudo systemctl restart fantasyxi
-          
+
           echo "Waiting for service to start..."
           sleep 3
-          
+
           echo "Health check..."
           curl -f http://localhost:10000/health
           
