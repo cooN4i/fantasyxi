@@ -3,6 +3,7 @@ import json
 import logging
 import hashlib
 import socket
+import threading
 import requests
 import telebot.apihelper
 from flask import Flask, request, jsonify
@@ -45,10 +46,10 @@ TINKOFF_INIT_URL = os.getenv("TINKOFF_INIT_URL")
 
 DADATA_TOKEN = os.getenv("DADATA_API_KEY")
 
-# ========== НАСТРОЙКА TELEBOT С ПРИНУДИТЕЛЬНЫМ ЗАКРЫТИЕМ СОЕДИНЕНИЙ ==========
-
+# ========== НАСТРОЙКА TELEBOT ==========
 # Явно отключаем прокси
 telebot.apihelper.proxy = {}
+
 # Создаём сессию с оптимальными настройками
 session = requests.Session()
 session.headers.update({'Connection': 'close'})
@@ -61,7 +62,7 @@ retry_strategy = Retry(
 
 adapter = HTTPAdapter(
     max_retries=retry_strategy,
-    pool_connections=10,   # Для нескольких пользователей
+    pool_connections=10,
     pool_maxsize=10,
 )
 session.mount("https://", adapter)
@@ -75,17 +76,32 @@ telebot.apihelper.READ_TIMEOUT = 5
 # Создаём бота
 bot = telebot.TeleBot(TOKEN)
 
+
+# ========== АСИНХРОННАЯ ОТПРАВКА СООБЩЕНИЙ ==========
+def send_message_async(chat_id, text, parse_mode=None, reply_markup=None):
+    """Отправляет сообщение в отдельном потоке (не блокирует вебхук)"""
+    def _send():
+        try:
+            bot.send_message(chat_id, text, parse_mode=parse_mode,
+                             reply_markup=reply_markup)
+        except Exception as e:
+            logging.error(f"Ошибка отправки сообщения в {chat_id}: {e}")
+
+    thread = threading.Thread(target=_send)
+    thread.daemon = True
+    thread.start()
+
+
 # ========== FLASK ==========
 app = Flask(__name__)
-CORS(app)  # Включаем CORS для всех маршрутов
+CORS(app)
 
 # ========== ЛОГИРОВАНИЕ ==========
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 # ========== ПЛАТЁЖ ==========
-
-
 def generate_token(data: dict, password: str):
     data_for_token = {}
 
@@ -146,13 +162,11 @@ def init_payment():
 
 @app.route('/get-dadata-token', methods=['GET'])
 def get_dadata_token():
-    """Отдаёт токен DaData для фронтенда"""
     return jsonify({"token": DADATA_TOKEN})
 
 
 @app.route('/config', methods=['GET'])
 def get_config():
-    """Отдаёт публичные настройки для фронтенда"""
     return jsonify({
         "dadataToken": DADATA_TOKEN,
         "backendUrl": os.getenv("BACKEND_URL", "https://fantasyxi.abrdns.com")
@@ -160,7 +174,6 @@ def get_config():
 
 
 # ========== ВЕБХУК ==========
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
     logger.info("🔥 WEBHOOK RECEIVED")
@@ -170,10 +183,7 @@ def webhook():
     if not update_json:
         return jsonify({'ok': True})
 
-    # ========== ОБРАБОТКА ДАННЫХ ИЗ МИНИ-ПРИЛОЖЕНИЯ ==========
-    web_app_data = None
-    chat_id = None
-
+    # Обработка данных из мини-приложения
     if 'message' in update_json and 'web_app_data' in update_json['message']:
         web_app_data = update_json['message']['web_app_data']['data']
         chat_id = update_json['message']['chat']['id']
@@ -222,32 +232,26 @@ def webhook():
             )
 
             if ADMIN_CHAT_ID:
-                try:
-                    bot.send_message(
-                        ADMIN_CHAT_ID, admin_message, parse_mode="HTML")
-                    logger.info("✅ Отправлено админу")
-                except Exception as e:
-                    logger.error(f"❌ Ошибка отправки админу: {e}")
+                send_message_async(
+                    ADMIN_CHAT_ID, admin_message, parse_mode="HTML")
+                logger.info("✅ Отправлено админу (асинхронно)")
 
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton(
                 "📩 Написать в поддержку", url="https://t.me/kylo_gg"))
 
-            try:
-                bot.send_message(
-                    chat_id,
-                    f"✅ <b>Спасибо за заказ!</b>\n\n📦 №{order_id}",
-                    parse_mode="HTML",
-                    reply_markup=markup
-                )
-                logger.info("✅ Отправлено клиенту")
-            except Exception as e:
-                logger.error(f"❌ Ошибка отправки клиенту: {e}")
+            send_message_async(
+                chat_id,
+                f"✅ <b>Спасибо за заказ!</b>\n\n📦 №{order_id}",
+                parse_mode="HTML",
+                reply_markup=markup
+            )
+            logger.info("✅ Отправлено клиенту (асинхронно)")
 
         except Exception as e:
             logger.error(f"❌ Ошибка обработки web_app_data: {e}")
 
-    # ========== ОБРАБОТКА ОБЫЧНЫХ КОМАНД (например, /start) ==========
+    # Обработка команды /start
     elif 'message' in update_json and 'text' in update_json['message']:
         chat_id = update_json['message']['chat']['id']
         text = update_json['message']['text']
@@ -256,30 +260,29 @@ def webhook():
         if text == '/start':
             try:
                 markup = ReplyKeyboardMarkup(resize_keyboard=True)
-                web_app = WebAppInfo(
-                    url="https://fantasyxi.abrdns.com/")
+                web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/")
                 button = KeyboardButton(
                     text="⚽ Открыть конструктор", web_app=web_app)
                 markup.add(button)
-                bot.send_message(
+
+                send_message_async(
                     chat_id,
                     "Нажмите кнопку ниже 👇\n\n⚠️ ВНИМАНИЕ! После загрузки мини-приложения необходимо отключить VPN для нормальной работы",
                     reply_markup=markup
                 )
-                logger.info("✅ Отправлено приветственное сообщение")
+                logger.info(
+                    "✅ Отправлено приветственное сообщение (асинхронно)")
             except Exception as e:
                 logger.error(f"❌ Ошибка отправки приветствия: {e}")
 
     return jsonify({'ok': True})
 
 
-# ========== СТАРТ ==========
-
+# ========== СТАРТ (для polling режима, НЕ ИСПОЛЬЗУЕТСЯ ПРИ WEBHOOK) ==========
 @bot.message_handler(commands=['start'])
 def start(message):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    web_app = WebAppInfo(
-        url="https://fantasyxi.abrdns.com/")
+    web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/")
     button = KeyboardButton(text="⚽ Открыть конструктор", web_app=web_app)
     markup.add(button)
     bot.send_message(
@@ -290,7 +293,6 @@ def start(message):
 
 
 # ========== HEALTH ==========
-
 @app.route('/health', methods=['GET'])
 def health():
     return "OK", 200
@@ -302,10 +304,9 @@ def index():
 
 
 # ========== WEBHOOK SET ==========
-
 def set_webhook():
     bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL, timeout=5)
+    bot.set_webhook(url=WEBHOOK_URL)
     logger.info("✅ Webhook set")
 
 
