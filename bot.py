@@ -47,9 +47,8 @@ DADATA_TOKEN = os.getenv("DADATA_API_KEY")
 # Явно отключаем прокси
 telebot.apihelper.proxy = {}
 
-# Увеличиваем таймауты
-telebot.apihelper.CONNECT_TIMEOUT = 30
-telebot.apihelper.READ_TIMEOUT = 30
+telebot.apihelper.CONNECT_TIMEOUT = 1
+telebot.apihelper.READ_TIMEOUT = 1
 
 # Создаём бота
 bot = telebot.TeleBot(TOKEN)
