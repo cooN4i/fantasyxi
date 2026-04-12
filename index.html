@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Состав мечты</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #f0f2f5;
+            margin: 0;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .team-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+            width: 100%;
+            max-width: 500px;
+        }
+        .team-card {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.2s;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+        .team-card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .team-card:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+    <h1 style="margin-bottom: 24px;">Выбери команду</h1>
+    <div class="team-grid">
+        <div class="team-card" data-team="Барселона">Барселона</div>
+        <!-- Сюда добавишь позже: Реал Мадрид, и т.д. -->
+    </div>
+
+    <script>
+        // Проверка платформы сразу при открытии
+        if (window.Telegram && Telegram.WebApp) {
+            Telegram.WebApp.ready();
+            Telegram.WebApp.expand();
+
+            const platform = Telegram.WebApp.platform || '';
+            if (platform === 'web') {
+                alert('❌ Заказ можно оформить только через мобильное или десктопное приложение Telegram!\n\nПожалуйста, откройте бота в приложении (не в браузере).');
+                Telegram.WebApp.close();
+            }
+        }
+
+        const cards = document.querySelectorAll('.team-card');
+        cards.forEach(card => {
+            card.addEventListener('click', () => {
+                const team = card.dataset.team;
+                window.location.href = `constructor.html?team=${encodeURIComponent(team)}`;
+            });
+        });
+    </script>
+</body>
+</html>
