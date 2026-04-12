@@ -230,12 +230,6 @@ def webhook():
         except Exception as e:
             logger.error(f"❌ Ошибка обработки web_app_data: {e}")
 
-    try:
-        update = Update.de_json(update_json)
-        bot.process_new_updates([update])
-    except Exception as e:
-        logger.error(f"❌ Update error: {e}")
-
     return jsonify({'ok': True})
 
 
@@ -245,7 +239,7 @@ def webhook():
 def start(message):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
     web_app = WebAppInfo(
-        url="https://fantasyxi.abrdns.com/constructor.html?team=Барселона")
+        url="https://fantasyxi.abrdns.com/")
     button = KeyboardButton(text="⚽ Открыть конструктор", web_app=web_app)
     markup.add(button)
     bot.send_message(
@@ -271,7 +265,7 @@ def index():
 
 def set_webhook():
     bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL)
+    bot.set_webhook(url=WEBHOOK_URL, timeout=5)
     logger.info("✅ Webhook set")
 
 
