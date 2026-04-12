@@ -400,12 +400,16 @@
             async function initDaData() {
                 if (typeof $.fn.suggestions === 'undefined') return;
                 try {
-                    const config = await loadConfig();
-                    const token = config?.dadataToken;
+                    // Используем относительный путь или полный URL
+                    const response = await fetch('/get-dadata-token');
+                    const data = await response.json();
+                    const token = data.token;
+                    
                     if (!token) {
-                        console.warn('DaData токен не получен');
+                        console.warn('DaData token not received');
                         return;
                     }
+                    
                     if (!$('#address').data('suggestions')) {
                         $("#address").suggestions({
                             token: token,
@@ -417,7 +421,7 @@
                         });
                     }
                 } catch(e) {
-                    console.warn('Ошибка инициализации DaData', e);
+                    console.warn('Ошибка инициализации DaData:', e);
                 }
             }
 
