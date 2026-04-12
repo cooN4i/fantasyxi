@@ -213,12 +213,14 @@ def webhook():
 @bot.message_handler(commands=['start'])
 def start(message):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    backend_url = os.getenv("BACKEND_URL", "https://football-dreamteam.onrender.com")
-    web_app = WebAppInfo(url=f"{backend_url}/static/constructor.html?team=Барселона")
+    web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/constructor.html")
     button = KeyboardButton(text="⚽ Открыть конструктор", web_app=web_app)
     markup.add(button)
-    bot.send_message(message.chat.id, "Нажмите кнопку ниже 👇\n\n⚠️ ВНИМАНИЕ! После загрузки мини-приложения необходимо отключить VPN для нормальной работы",
-                     reply_markup=markup)
+    bot.send_message(
+        message.chat.id, 
+        "Нажмите кнопку ниже 👇\n\n⚠️ ВНИМАНИЕ! После загрузки мини-приложения необходимо отключить VPN для нормальной работы",
+        reply_markup=markup
+    )
 
 
 # ---------------- HEALTH ----------------
