@@ -149,6 +149,7 @@ def webhook():
     if not update_json:
         return jsonify({'ok': True})
 
+    # ========== ОБРАБОТКА ДАННЫХ ИЗ МИНИ-ПРИЛОЖЕНИЯ ==========
     web_app_data = None
     chat_id = None
 
@@ -156,12 +157,7 @@ def webhook():
         web_app_data = update_json['message']['web_app_data']['data']
         chat_id = update_json['message']['chat']['id']
         logger.info("✅ web_app_data найден в message")
-    elif 'callback_query' in update_json and 'message' in update_json['callback_query'] and 'web_app_data' in update_json['callback_query']['message']:
-        web_app_data = update_json['callback_query']['message']['web_app_data']['data']
-        chat_id = update_json['callback_query']['message']['chat']['id']
-        logger.info("✅ web_app_data найден в callback_query")
 
-    if web_app_data:
         try:
             data = json.loads(web_app_data)
             logger.info(f"📊 Parsed data: {data}")
@@ -229,6 +225,29 @@ def webhook():
 
         except Exception as e:
             logger.error(f"❌ Ошибка обработки web_app_data: {e}")
+
+    # ========== ОБРАБОТКА ОБЫЧНЫХ КОМАНД (например, /start) ==========
+    elif 'message' in update_json and 'text' in update_json['message']:
+        chat_id = update_json['message']['chat']['id']
+        text = update_json['message']['text']
+        logger.info(f"📝 Получена команда: {text} от chat_id: {chat_id}")
+
+        if text == '/start':
+            try:
+                markup = ReplyKeyboardMarkup(resize_keyboard=True)
+                web_app = WebAppInfo(
+                    url="https://fantasyxi.abrdns.com/constructor.html?team=Барселона")
+                button = KeyboardButton(
+                    text="⚽ Открыть конструктор", web_app=web_app)
+                markup.add(button)
+                bot.send_message(
+                    chat_id,
+                    "Нажмите кнопку ниже 👇\n\n⚠️ ВНИМАНИЕ! После загрузки мини-приложения необходимо отключить VPN для нормальной работы",
+                    reply_markup=markup
+                )
+                logger.info("✅ Отправлено приветственное сообщение")
+            except Exception as e:
+                logger.error(f"❌ Ошибка отправки приветствия: {e}")
 
     return jsonify({'ok': True})
 
