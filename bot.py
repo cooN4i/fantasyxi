@@ -213,7 +213,7 @@ def webhook():
 @bot.message_handler(commands=['start'])
 def start(message):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/constructor.html")
+    web_app = WebAppInfo(url="https://fantasyxi.abrdns.com")
     button = KeyboardButton(text="⚽ Открыть конструктор", web_app=web_app)
     markup.add(button)
     bot.send_message(
