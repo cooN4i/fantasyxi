@@ -27,12 +27,12 @@ jobs:
     
     - name: Deploy to server
       run: |
-        ssh server "cd ~/football-bot && git pull origin main || git clone ${{ github.repositoryUrl }} ~/football-bot"
-        ssh server "cd ~/football-bot && cp .env.example .env 2>/dev/null || true"
-        ssh server "cd ~/football-bot && python3 -m venv venv"
-        ssh server "cd ~/football-bot && source venv/bin/activate && pip install -r requirements.txt"
-        ssh server "screen -S football-bot -X quit || true"
-        ssh server "cd ~/football-bot && screen -dmS football-bot bash -c 'source venv/bin/activate && python3 bot.py'"
+    	ssh server "cd ~/football-bot && git pull origin main || git clone https://github.com/cooN4i/fantasyxi.git ~/football-bot"
+    	ssh server "cd ~/football-bot && cp .env.example .env 2>/dev/null || true"
+    	ssh server "cd ~/football-bot && python3 -m venv venv"
+    	ssh server "cd ~/football-bot && source venv/bin/activate && pip install -r requirements.txt"
+    	ssh server "screen -S football-bot -X quit || true"
+    	ssh server "cd ~/football-bot && screen -dmS football-bot bash -c 'source venv/bin/activate && python3 bot.py'"
     
     - name: Check status
       run: |
