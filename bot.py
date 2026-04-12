@@ -46,10 +46,11 @@ TINKOFF_INIT_URL = os.getenv("TINKOFF_INIT_URL")
 DADATA_TOKEN = os.getenv("DADATA_API_KEY")
 
 # ========== НАСТРОЙКА TELEBOT С ПРИНУДИТЕЛЬНЫМ ЗАКРЫТИЕМ СОЕДИНЕНИЙ ==========
+
 # Явно отключаем прокси
 telebot.apihelper.proxy = {}
 
-# Создаём сессию с принудительным закрытием соединений
+# Создаём сессию с оптимальными настройками
 session = requests.Session()
 session.headers.update({'Connection': 'close'})
 
@@ -58,18 +59,17 @@ retry_strategy = Retry(
     backoff_factor=0.3,
     status_forcelist=[429, 500, 502, 503, 504],
 )
+
 adapter = HTTPAdapter(
     max_retries=retry_strategy,
-    pool_connections=1,
-    pool_maxsize=1,
+    pool_connections=10,   # Для нескольких пользователей
+    pool_maxsize=10,
 )
 session.mount("https://", adapter)
 session.mount("http://", adapter)
 
-# Применяем сессию к telebot
 telebot.apihelper._session = session
 
-# Таймауты (увеличены для надёжности)
 telebot.apihelper.CONNECT_TIMEOUT = 5
 telebot.apihelper.READ_TIMEOUT = 5
 
