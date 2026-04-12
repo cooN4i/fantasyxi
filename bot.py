@@ -49,7 +49,7 @@ DADATA_TOKEN = os.getenv("DADATA_API_KEY")
 
 # Явно отключаем прокси
 telebot.apihelper.proxy = {}
-
+telebot.apihelper.API_URL = "https://149.154.167.220/bot{0}/{1}"
 # Создаём сессию с оптимальными настройками
 session = requests.Session()
 session.headers.update({'Connection': 'close'})
