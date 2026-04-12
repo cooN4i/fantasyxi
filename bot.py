@@ -17,6 +17,8 @@ from telebot.types import (
     InlineKeyboardButton
 )
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ========== ПРИНУДИТЕЛЬНОЕ ИСПОЛЬЗОВАНИЕ IPv4 ==========
 import requests.packages.urllib3.util.connection as urllib3_cn
@@ -43,12 +45,33 @@ TINKOFF_INIT_URL = os.getenv("TINKOFF_INIT_URL")
 
 DADATA_TOKEN = os.getenv("DADATA_API_KEY")
 
-# ========== НАСТРОЙКА TELEBOT С ПРОКСИ И ТАЙМАУТАМИ ==========
+# ========== НАСТРОЙКА TELEBOT С ПРИНУДИТЕЛЬНЫМ ЗАКРЫТИЕМ СОЕДИНЕНИЙ ==========
 # Явно отключаем прокси
 telebot.apihelper.proxy = {}
 
-telebot.apihelper.CONNECT_TIMEOUT = 10
-telebot.apihelper.READ_TIMEOUT = 1
+# Создаём сессию с принудительным закрытием соединений
+session = requests.Session()
+session.headers.update({'Connection': 'close'})
+
+retry_strategy = Retry(
+    total=2,
+    backoff_factor=0.3,
+    status_forcelist=[429, 500, 502, 503, 504],
+)
+adapter = HTTPAdapter(
+    max_retries=retry_strategy,
+    pool_connections=1,
+    pool_maxsize=1,
+)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
+
+# Применяем сессию к telebot
+telebot.apihelper._session = session
+
+# Таймауты (увеличены для надёжности)
+telebot.apihelper.CONNECT_TIMEOUT = 5
+telebot.apihelper.READ_TIMEOUT = 5
 
 # Создаём бота
 bot = telebot.TeleBot(TOKEN)
