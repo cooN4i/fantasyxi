@@ -1,0 +1,40 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh/
+        echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        cat >> ~/.ssh/config << EOF
+        Host server
+          HostName ${{ secrets.SERVER_HOST }}
+          User ${{ secrets.SERVER_USER }}
+          IdentityFile ~/.ssh/deploy_key
+          StrictHostKeyChecking no
+        EOF
+    
+    - name: Deploy to server
+      run: |
+        ssh server "cd ~/football-bot && git pull origin main || git clone ${{ github.repositoryUrl }} ~/football-bot"
+        ssh server "cd ~/football-bot && cp .env.example .env 2>/dev/null || true"
+        ssh server "cd ~/football-bot && python3 -m venv venv"
+        ssh server "cd ~/football-bot && source venv/bin/activate && pip install -r requirements.txt"
+        ssh server "screen -S football-bot -X quit || true"
+        ssh server "cd ~/football-bot && screen -dmS football-bot bash -c 'source venv/bin/activate && python3 bot.py'"
+    
+    - name: Check status
+      run: |
+        ssh server "screen -ls | grep football-bot"
+        ssh server "curl -s http://localhost:10000/health || echo 'Health check pending...'"
