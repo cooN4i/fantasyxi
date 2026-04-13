@@ -20,9 +20,11 @@
     <style>
         * { box-sizing: border-box; }
         body {
-            font-family: system-ui, sans-serif;
             margin: 0;
-            padding: 16px;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: system-ui, sans-serif;
             background: #f0f2f5;
         }
         .back-button {
@@ -116,10 +118,12 @@
             box-shadow: 0 -4px 12px rgba(0,0,0,0.2);
             padding: 16px;
             max-height: 60vh;
-            .selector-panel {
+        }
+        .selector-panel {
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
             touch-action: pan-y;
+            position: fixed;
             z-index: 1000;
         }
         .selector-panel.active { display: block; }
@@ -231,8 +235,21 @@
         .clear-button { background: #dc3545; color: white; }
         .order-button { background: #28a745; color: white; }
         .secondary-button { background: #6c757d; color: white; }
-        .screen { display: none; }
-        .screen.active { display: block; }
+        .screen {
+            display: none;
+            width: 100%;
+            height: 100%;
+
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+
+            padding: 16px;
+            background: #f0f2f5;
+        }
+
+        .screen.active {
+            display: block;
+        }
         #constructorScreen { padding-bottom: 120px; }
         #paymentContainer {
             width: 100%;
@@ -245,13 +262,16 @@
             font-size: 18px;
             color: #666;
         }
-        html, body {
-            width: 100%;
+        body, html {
             height: 100%;
-            overflow-x: hidden;
-
-            touch-action: pan-x pan-y;
-            -ms-touch-action: pan-x pan-y;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+        }
+        #app {
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
         }
     </style>
 </head>
@@ -377,21 +397,7 @@
             const selectorTitle = document.getElementById('selectorTitle');
             const closeSelector = document.getElementById('closeSelector');
             const orderButton = document.getElementById('orderButton');
-            function resetZoom() {
-                document.documentElement.style.transform = 'scale(1)';
-                document.documentElement.style.transformOrigin = '0 0';
-
-                // iOS hack — принудительно пересчитать viewport
-                const meta = document.querySelector('meta[name=viewport]');
-                if (meta) {
-                    meta.setAttribute(
-                        'content',
-                        'width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover'
-                    );
-                }
-            }
             function showScreen(screenName) {
-                resetZoom();
                 constructorScreen.classList.remove('active');
                 formScreen.classList.remove('active');
                 reviewScreen.classList.remove('active');
@@ -742,13 +748,6 @@
                 }
             }
         })();
-        document.addEventListener('touchend', function (e) {
-            const now = Date.now();
-            if (window.__lastTouch && (now - window.__lastTouch) < 300) {
-                e.preventDefault();
-            }
-            window.__lastTouch = now;
-        }, { passive: false });
     </script>
 </body>
 </html>
