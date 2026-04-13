@@ -242,6 +242,14 @@
             font-size: 18px;
             color: #666;
         }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow-x: hidden;
+
+            touch-action: pan-x pan-y;
+            -ms-touch-action: pan-x pan-y;
+        }
     </style>
 </head>
 <body>
@@ -325,7 +333,7 @@
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
 
             // === КОНФИГУРАЦИЯ (динамическая) ===
-            const BACKEND_URL = 'https://fantasyxi.abrdns.com';
+            let BACKEND_URL = 'https://fantasyxi.abrdns.com';
             
             // Загружаем конфигурацию с бэкенда
             async function loadConfig() {
