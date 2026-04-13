@@ -662,7 +662,7 @@
 
             // ---------- ОПЛАТА ----------
             let paymentIntegrationInitialized = false;
-            const paymentContainer = document.getElementById('paymentContainer');
+            let paymentContainer = document.getElementById('paymentContainer');
 
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
@@ -695,9 +695,15 @@
                 paymentContainer.replaceChildren();
                 paymentIntegrationInitialized = false;
             }
-
+            function recreatePaymentContainer() {
+                const old = document.getElementById('paymentContainer');
+                const fresh = old.cloneNode(false);
+                old.parentNode.replaceChild(fresh, old);
+                return fresh;
+            }
             async function startPayment() {
                 resetPaymentIntegration();
+                paymentContainer = recreatePaymentContainer();
                 if (!window.PaymentIntegration) {
                     alert('Платёжный модуль ещё не загружен, попробуйте через секунду');
                     showScreen('review');
