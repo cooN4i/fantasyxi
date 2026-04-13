@@ -405,13 +405,13 @@
                 if (screenName === 'constructor') constructorScreen.classList.add('active');
                 else if (screenName === 'form') {
                     daDataState = 'idle';
+                    initDaData();
                     formScreen.classList.add('active');
                     document.getElementById('surname').value = customerData.surname;
                     document.getElementById('name').value = customerData.name;
                     document.getElementById('patronymic').value = customerData.patronymic;
                     document.getElementById('phone').value = customerData.phone;
                     document.getElementById('address').value = customerData.address;
-                    document.getElementById('address').focus();
                     if (!iti) {
                         const input = document.querySelector('#phone');
                         iti = window.intlTelInput(input, {
@@ -429,10 +429,10 @@
             function updateOrderButtonVisibility() { orderButton.style.display = isTeamComplete() ? 'inline-block' : 'none'; }
             let daDataReady = false;
             async function initDaData() {
-                if (daDataReady) return;
-
                 const input = document.getElementById('address');
                 if (!input) return;
+
+                if (input.dataset.dadataInit === "1") return;
 
                 try {
                     const res = await fetch(`${BACKEND_URL}/get-dadata-token`, {
@@ -454,11 +454,10 @@
                         }
                     });
 
-                    daDataReady = true;
+                    input.dataset.dadataInit = "1";
 
                 } catch (e) {
                     console.warn('DaData init error', e);
-                    daDataReady = false;
                 }
             }
 
@@ -635,9 +634,6 @@
             function initApp() {
                 positions.forEach(p => p.addEventListener('click', () => openSelector(p)));
                 closeSelector.addEventListener('click', closePanel);
-                document.getElementById('address').addEventListener('focus', () => {
-                    initDaData();
-                });
                 document.getElementById('clearButton').addEventListener('click', clearField);
                 orderButton.addEventListener('click', () => { if (isTeamComplete()) showScreen('form'); });
                 document.getElementById('backFromForm').addEventListener('click', () => showScreen('constructor'));
