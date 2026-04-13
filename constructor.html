@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
     <title>Конструктор состава</title>
     <!-- Telegram SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -116,7 +116,10 @@
             box-shadow: 0 -4px 12px rgba(0,0,0,0.2);
             padding: 16px;
             max-height: 60vh;
+            .selector-panel {
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
             z-index: 1000;
         }
         .selector-panel.active { display: block; }
@@ -374,8 +377,21 @@
             const selectorTitle = document.getElementById('selectorTitle');
             const closeSelector = document.getElementById('closeSelector');
             const orderButton = document.getElementById('orderButton');
+            function resetZoom() {
+                document.documentElement.style.transform = 'scale(1)';
+                document.documentElement.style.transformOrigin = '0 0';
 
+                // iOS hack — принудительно пересчитать viewport
+                const meta = document.querySelector('meta[name=viewport]');
+                if (meta) {
+                    meta.setAttribute(
+                        'content',
+                        'width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover'
+                    );
+                }
+            }
             function showScreen(screenName) {
+                resetZoom();
                 constructorScreen.classList.remove('active');
                 formScreen.classList.remove('active');
                 reviewScreen.classList.remove('active');
@@ -634,6 +650,7 @@
 
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
+                document.activeElement?.blur();
                 customerData.order_id = Math.floor(Math.random() * 9900) + 100;
                 paymentInProgress = true;
                 showScreen('payment');
@@ -725,6 +742,13 @@
                 }
             }
         })();
+        document.addEventListener('touchend', function (e) {
+            const now = Date.now();
+            if (window.__lastTouch && (now - window.__lastTouch) < 300) {
+                e.preventDefault();
+            }
+            window.__lastTouch = now;
+        }, { passive: false });
     </script>
 </body>
 </html>
