@@ -692,7 +692,7 @@
                 } catch (e) {
                     console.warn('destroy error', e);
                 }
-                paymentContainer.innerHTML = '';
+                paymentContainer.replaceChildren();
                 paymentIntegrationInitialized = false;
             }
 
