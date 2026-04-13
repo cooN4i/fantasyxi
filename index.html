@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Состав мечты</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -25,11 +25,18 @@
             width: 100%;
             max-width: 500px;
         }
+        .team-logo {
+            width: 28px;
+            height: 28px;
+            object-fit: contain;
+        }
         .team-card {
+            display: flex;
+            align-items: center;
+            gap: 10px;
             background: white;
             border-radius: 16px;
             padding: 20px;
-            text-align: center;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             cursor: pointer;
             transition: transform 0.1s, box-shadow 0.2s;
@@ -48,8 +55,14 @@
 <body>
     <h1 style="margin-bottom: 24px;">Выбери команду</h1>
     <div class="team-grid">
-        <div class="team-card" data-team="Барселона">Барселона</div>
-        <!-- Сюда добавишь позже: Реал Мадрид, и т.д. -->
+        <div class="team-card" data-team="Барселона">
+            <img 
+                src="https://upload.wikimedia.org/wikipedia/en/4/47/FC_Barcelona_%28crest%29.svg" 
+                class="team-logo"
+                alt="Barcelona"
+            >
+            <span>Барселона</span>
+        </div>
     </div>
 
     <script>
@@ -71,6 +84,13 @@
                 const team = card.dataset.team;
                 window.location.href = `constructor.html?team=${encodeURIComponent(team)}`;
             });
+        });
+        document.addEventListener('gesturestart', function (e) {
+            e.preventDefault();
+        });
+
+        document.addEventListener('dblclick', function (e) {
+            e.preventDefault();
         });
     </script>
 </body>
