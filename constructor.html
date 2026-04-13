@@ -410,6 +410,7 @@
                     document.getElementById('patronymic').value = customerData.patronymic;
                     document.getElementById('phone').value = customerData.phone;
                     document.getElementById('address').value = customerData.address;
+                    document.getElementById('address').focus();
                     if (!iti) {
                         const input = document.querySelector('#phone');
                         iti = window.intlTelInput(input, {
@@ -426,32 +427,48 @@
 
             function isTeamComplete() { return fieldPositions.size === 11; }
             function updateOrderButtonVisibility() { orderButton.style.display = isTeamComplete() ? 'inline-block' : 'none'; }
-
+            
+            let daDataInitialized = false;
             async function initDaData() {
-                if (typeof $.fn.suggestions === 'undefined') return;
+                if (daDataInitialized) return;
+
+                const input = document.getElementById('address');
+                if (!input) return;
+
+                if (typeof $.fn.suggestions !== 'function') {
+                    setTimeout(initDaData, 300);
+                    return;
+                }
+
                 try {
-                    // Используем относительный путь или полный URL
-                    const response = await fetch('/get-dadata-token');
-                    const data = await response.json();
-                    const token = data.token;
-                    
-                    if (!token) {
-                        console.warn('DaData token not received');
-                        return;
-                    }
-                    
-                    if (!$('#address').data('suggestions')) {
-                        $("#address").suggestions({
-                            token: token,
-                            type: "ADDRESS",
-                            onSelect: function(suggestion) {
-                                customerData.address = suggestion.value;
-                                document.getElementById('addressError').classList.remove('visible');
-                            }
-                        });
-                    }
-                } catch(e) {
-                    console.warn('Ошибка инициализации DaData:', e);
+                    $(input).suggestions('dispose');
+
+                    const res = await fetch(`${BACKEND_URL}/get-dadata-token`, {
+                        cache: "no-store"
+                    });
+
+                    if (!res.ok) throw new Error('Token request failed');
+
+                    const data = await res.json();
+                    if (!data?.token) throw new Error('No token received');
+
+                    $(input).suggestions({
+                        token: data.token,
+                        type: "ADDRESS",
+                        count: 5,
+                        minChars: 3,
+                        triggerSelectOnSpace: false,
+                        onSelect: function (s) {
+                            customerData.address = s.value;
+                            document.getElementById('addressError').classList.remove('visible');
+                        }
+                    });
+
+                    daDataInitialized = true;
+
+                } catch (e) {
+                    console.warn('DaData init failed, retry...', e);
+                    setTimeout(initDaData, 1000);
                 }
             }
 
@@ -656,6 +673,7 @@
 
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
+                
                 document.activeElement?.blur();
                 customerData.order_id = Math.floor(Math.random() * 9900) + 100;
                 paymentInProgress = true;
