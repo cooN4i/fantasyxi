@@ -3,13 +3,10 @@ import json
 import logging
 import hashlib
 import requests
-import time
-import threading
-
-from queue import Queue
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
 import telebot
 from telebot.types import (
     ReplyKeyboardMarkup,
@@ -18,7 +15,11 @@ from telebot.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton
 )
+
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ========== ENV ==========
 load_dotenv()
@@ -33,61 +34,57 @@ TINKOFF_INIT_URL = os.getenv("TINKOFF_INIT_URL")
 
 DADATA_TOKEN = os.getenv("DADATA_API_KEY")
 
-# ========== BOT ==========
-bot = telebot.TeleBot(TOKEN, threaded=False)
-
-# БОЛЕЕ СТАБИЛЬНЫЕ TIMEOUT (важно)
-telebot.apihelper.CONNECT_TIMEOUT = 10
-telebot.apihelper.READ_TIMEOUT = 10
+# ========== LOGGING ==========
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("bot")
 
 # ========== FLASK ==========
 app = Flask(__name__)
 CORS(app)
 
-# ========== LOGGING ==========
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ========== THREAD POOL (КЛЮЧЕВОЕ УСКОРЕНИЕ) ==========
+executor = ThreadPoolExecutor(max_workers=10)
 
-# ========== TELEGRAM QUEUE SYSTEM ==========
-telegram_queue = Queue()
+# ========== REQUESTS SESSION (CONNECTION POOL + RETRY) ==========
+session = requests.Session()
 
+retry = Retry(
+    total=3,
+    backoff_factor=0.3,
+    status_forcelist=[500, 502, 503, 504],
+    allowed_methods=["POST", "GET"]
+)
 
-def telegram_worker():
-    """Фоновый воркер Telegram отправки"""
-    while True:
-        job = telegram_queue.get()
-        try:
-            job()
-        except Exception as e:
-            logger.error(f"❌ Telegram worker error: {e}")
-        finally:
-            telegram_queue.task_done()
+adapter = HTTPAdapter(
+    max_retries=retry,
+    pool_connections=20,
+    pool_maxsize=20
+)
 
+session.mount("https://", adapter)
+session.mount("http://", adapter)
 
-threading.Thread(target=telegram_worker, daemon=True).start()
+# ========== TELEGRAM BOT ==========
+bot = telebot.TeleBot(TOKEN, threaded=False)
+telebot.apihelper.session = session
 
-
-def safe_telegram_send(fn, retries=3):
-    """Retry wrapper для Telegram API"""
-    def wrapper():
-        last_error = None
-        for i in range(retries):
-            try:
-                return fn()
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Telegram retry {i+1}/{retries}: {e}")
-                time.sleep(1)
-        raise last_error
-    return wrapper
+# ========== HELPERS ==========
 
 
-def send_async(fn):
-    """Кладём задачу в очередь"""
-    telegram_queue.put(safe_telegram_send(fn))
+def safe_send_message(chat_id, text, **kwargs):
+    """Telegram send with retry-safe session"""
+    try:
+        return bot.send_message(chat_id, text, **kwargs)
+    except Exception as e:
+        logger.warning(f"Telegram send failed: {e}")
+        return None
 
 
-# ========== TOKEN ==========
+def async_telegram_task(fn, *args, **kwargs):
+    """Запуск Telegram задач в фоне"""
+    executor.submit(fn, *args, **kwargs)
+
+
 def generate_token(data: dict, password: str):
     data_for_token = {}
 
@@ -97,6 +94,7 @@ def generate_token(data: dict, password: str):
         data_for_token[k] = v
 
     data_for_token["Password"] = password
+
     sorted_items = sorted(data_for_token.items())
     concat = "".join(str(v) for k, v in sorted_items)
 
@@ -121,28 +119,29 @@ def init_payment():
         "Receipt": {
             "Phone": customer_phone,
             "Taxation": "usn_income",
-            "Items": [{
-                "Name": "Футбольный состав",
-                "Price": amount,
-                "Quantity": 1,
-                "Amount": amount,
-                "Tax": "none"
-            }]
+            "Items": [
+                {
+                    "Name": "Футбольный состав",
+                    "Price": amount,
+                    "Quantity": 1,
+                    "Amount": amount,
+                    "Tax": "none"
+                }
+            ]
         }
     }
 
     payload["Token"] = generate_token(payload, PASSWORD)
 
     try:
-        r = requests.post(TINKOFF_INIT_URL, json=payload, timeout=10)
-        data = r.json()
+        resp = session.post(TINKOFF_INIT_URL, json=payload, timeout=5)
+        data = resp.json()
         return jsonify({"PaymentURL": data.get("PaymentURL")})
     except Exception as e:
         logger.error(f"❌ PAYMENT ERROR: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-# ========== DADATA ==========
 @app.route('/get-dadata-token', methods=['GET'])
 def get_dadata_token():
     return jsonify({"token": DADATA_TOKEN})
@@ -156,6 +155,94 @@ def get_config():
     })
 
 
+# ========== TELEGRAM PROCESSORS (ASYNC) ==========
+def process_webapp_data(message):
+    try:
+        chat_id = message['chat']['id']
+        data = json.loads(message['web_app_data']['data'])
+
+        order_id = data.get("order_id", "—")
+        order_date = data.get("order_date", "—")
+        team = data.get("team", "—")
+        customer = data.get("customer", {})
+        players = data.get("players", [])
+
+        from_user = message.get('from', {})
+
+        tg_id = customer.get("telegram_id") or chat_id
+        tg_username = customer.get("telegram") or (
+            "@" + from_user.get("username")
+            if from_user.get("username") else None
+        )
+
+        customer_text = (
+            f"{customer.get('surname', '')} "
+            f"{customer.get('name', '')} "
+            f"{customer.get('patronymic', '')}"
+        ).strip()
+
+        players_text = "\n".join(
+            [f"• {p.get('position')}: {p.get('name')}" for p in players]
+        )
+
+        admin_message = (
+            f"📦 <b>Новый заказ №{order_id}</b>\n\n"
+            f"📅 {order_date}\n"
+            f"⚽ {team}\n\n"
+            f"👤 {customer_text}\n"
+            f"📱 {tg_username or '—'}\n"
+            f"🆔 {tg_id}\n"
+            f"📞 {customer.get('phone', '—')}\n"
+            f"📍 {customer.get('address', '—')}\n\n"
+            f"{players_text}"
+        )
+
+        if ADMIN_CHAT_ID:
+            safe_send_message(
+                ADMIN_CHAT_ID,
+                admin_message,
+                parse_mode="HTML"
+            )
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton(
+            "📩 Написать в поддержку",
+            url="https://t.me/kylo_gg"
+        ))
+
+        safe_send_message(
+            chat_id,
+            f"✅ <b>Спасибо за заказ!</b>\n\n📦 №{order_id}",
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+
+    except Exception as e:
+        logger.error(f"❌ web_app_data error: {e}")
+
+
+def process_start(message):
+    try:
+        chat_id = message['chat']['id']
+
+        markup = ReplyKeyboardMarkup(resize_keyboard=True)
+        web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/")
+        button = KeyboardButton(
+            text="⚽ Открыть конструктор",
+            web_app=web_app
+        )
+        markup.add(button)
+
+        safe_send_message(
+            chat_id,
+            "Нажмите кнопку ниже 👇",
+            reply_markup=markup
+        )
+
+    except Exception as e:
+        logger.error(f"❌ start error: {e}")
+
+
 # ========== WEBHOOK ==========
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -166,101 +253,18 @@ def webhook():
 
     logger.info("🔥 WEBHOOK RECEIVED")
 
-    # ===== WEBAPP DATA =====
-    if 'message' in update_json and 'web_app_data' in update_json['message']:
-        try:
-            message = update_json['message']
-            chat_id = message['chat']['id']
+    message = update_json.get('message')
+    if not message:
+        return jsonify({'ok': True})
 
-            data = json.loads(message['web_app_data']['data'])
+    # ⚡ ВАЖНО: ВСЁ УХОДИТ В ФОН
+    if 'web_app_data' in message:
+        executor.submit(process_webapp_data, message)
 
-            order_id = data.get("order_id", "—")
-            order_date = data.get("order_date", "—")
-            team = data.get("team", "—")
-            customer = data.get("customer", {})
-            players = data.get("players", [])
+    elif 'text' in message and message.get('text') == '/start':
+        executor.submit(process_start, message)
 
-            from_user = message.get('from', {})
-
-            tg_id = customer.get("telegram_id") or chat_id
-            tg_username = customer.get("telegram") or (
-                "@" + from_user.get("username")
-                if from_user.get("username") else None
-            )
-
-            customer_text = (
-                f"{customer.get('surname', '')} "
-                f"{customer.get('name', '')} "
-                f"{customer.get('patronymic', '')}"
-            ).strip()
-
-            players_text = "\n".join(
-                [f"• {p.get('position')}: {p.get('name')}" for p in players]
-            )
-
-            admin_message = (
-                f"📦 <b>Новый заказ №{order_id}</b>\n\n"
-                f"📅 {order_date}\n"
-                f"⚽ {team}\n\n"
-                f"👤 {customer_text}\n"
-                f"📱 {tg_username or '—'}\n"
-                f"🆔 {tg_id}\n"
-                f"📞 {customer.get('phone', '—')}\n"
-                f"📍 {customer.get('address', '—')}\n\n"
-                f"{players_text}"
-            )
-
-            # ===== ADMIN MESSAGE (ASYNC) =====
-            if ADMIN_CHAT_ID:
-                send_async(lambda: bot.send_message(
-                    ADMIN_CHAT_ID,
-                    admin_message,
-                    parse_mode="HTML"
-                ))
-
-            # ===== USER MESSAGE (ASYNC) =====
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(
-                "📩 Написать в поддержку",
-                url="https://t.me/kylo_gg"
-            ))
-
-            send_async(lambda: bot.send_message(
-                chat_id,
-                f"✅ <b>Спасибо за заказ!</b>\n\n📦 №{order_id}",
-                parse_mode="HTML",
-                reply_markup=markup
-            ))
-
-        except Exception as e:
-            logger.error(f"❌ web_app_data error: {e}")
-
-    # ===== /start =====
-    elif 'message' in update_json and 'text' in update_json['message']:
-        try:
-            message = update_json['message']
-            chat_id = message['chat']['id']
-            text = message['text']
-
-            if text == '/start':
-                markup = ReplyKeyboardMarkup(resize_keyboard=True)
-                web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/")
-                button = KeyboardButton(
-                    text="⚽ Открыть конструктор",
-                    web_app=web_app
-                )
-                markup.add(button)
-
-                send_async(lambda: bot.send_message(
-                    chat_id,
-                    "Нажмите кнопку ниже 👇",
-                    reply_markup=markup
-                ))
-
-        except Exception as e:
-            logger.error(f"❌ start error: {e}")
-
-    return jsonify({'ok': True})
+    return jsonify({'ok': True})  # ⚡ мгновенный ответ Telegram
 
 
 # ========== HEALTH ==========
