@@ -404,6 +404,7 @@
                 paymentScreen.classList.remove('active');
                 if (screenName === 'constructor') constructorScreen.classList.add('active');
                 else if (screenName === 'form') {
+                    daDataState = 'idle';
                     formScreen.classList.add('active');
                     document.getElementById('surname').value = customerData.surname;
                     document.getElementById('name').value = customerData.name;
@@ -420,37 +421,26 @@
                             utilsScript: "https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/js/utils.js"
                         });
                     }
-                    initDaData();
                 } else if (screenName === 'review') reviewScreen.classList.add('active');
                 else if (screenName === 'payment') paymentScreen.classList.add('active');
             }
 
             function isTeamComplete() { return fieldPositions.size === 11; }
             function updateOrderButtonVisibility() { orderButton.style.display = isTeamComplete() ? 'inline-block' : 'none'; }
-            
-            let daDataInitialized = false;
+            let daDataReady = false;
             async function initDaData() {
-                if (daDataInitialized) return;
+                if (daDataReady) return;
 
                 const input = document.getElementById('address');
                 if (!input) return;
 
-                if (typeof $.fn.suggestions !== 'function') {
-                    setTimeout(initDaData, 300);
-                    return;
-                }
-
                 try {
-                    $(input).suggestions('dispose');
-
                     const res = await fetch(`${BACKEND_URL}/get-dadata-token`, {
                         cache: "no-store"
                     });
 
-                    if (!res.ok) throw new Error('Token request failed');
-
                     const data = await res.json();
-                    if (!data?.token) throw new Error('No token received');
+                    if (!data?.token) throw new Error('No token');
 
                     $(input).suggestions({
                         token: data.token,
@@ -458,17 +448,17 @@
                         count: 5,
                         minChars: 3,
                         triggerSelectOnSpace: false,
-                        onSelect: function (s) {
+                        onSelect: (s) => {
                             customerData.address = s.value;
                             document.getElementById('addressError').classList.remove('visible');
                         }
                     });
 
-                    daDataInitialized = true;
+                    daDataReady = true;
 
                 } catch (e) {
-                    console.warn('DaData init failed, retry...', e);
-                    setTimeout(initDaData, 1000);
+                    console.warn('DaData init error', e);
+                    daDataReady = false;
                 }
             }
 
@@ -645,6 +635,9 @@
             function initApp() {
                 positions.forEach(p => p.addEventListener('click', () => openSelector(p)));
                 closeSelector.addEventListener('click', closePanel);
+                document.getElementById('address').addEventListener('focus', () => {
+                    initDaData();
+                });
                 document.getElementById('clearButton').addEventListener('click', clearField);
                 orderButton.addEventListener('click', () => { if (isTeamComplete()) showScreen('form'); });
                 document.getElementById('backFromForm').addEventListener('click', () => showScreen('constructor'));
