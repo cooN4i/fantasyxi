@@ -255,6 +255,16 @@
             width: 100%;
             min-height: 500px;
             margin-top: 20px;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        #paymentContainer iframe {
+            border: none;
+            display: block;
+            width: 100%;
+            min-height: 500px;
+            background: white;
         }
         .payment-loader {
             text-align: center;
@@ -382,6 +392,30 @@
         (function() {
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
 
+            // ========== ПРОВЕРКА ВОЗВРАТА ПОСЛЕ T-PAY ==========
+            const urlParams = new URLSearchParams(window.location.search);
+            const paymentStatus = urlParams.get('Success');
+            
+            if (paymentStatus === 'true') {
+                // Платёж успешен — отправляем заказ
+                const savedOrder = sessionStorage.getItem('pendingOrder');
+                if (savedOrder) {
+                    try {
+                        Telegram.WebApp.sendData(savedOrder);
+                        document.body.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
+                        setTimeout(() => Telegram.WebApp.close(), 2000);
+                    } catch(e) {
+                        console.error('Send error:', e);
+                    }
+                }
+                return; // Не продолжаем загрузку конструктора
+            }
+            
+            if (paymentStatus === 'false') {
+                alert('❌ Оплата не прошла. Попробуйте снова.');
+            }
+            // ========== КОНЕЦ ПРОВЕРКИ ==========
+
             // === КОНФИГУРАЦИЯ (динамическая) ===
             let BACKEND_URL = 'https://fantasyxi.abrdns.com';
             
@@ -398,7 +432,6 @@
                 }
             }
 
-            const urlParams = new URLSearchParams(window.location.search);
             let team = urlParams.get('team') || 'Барселона';
             document.getElementById('team-title').textContent = `Состав ${team}`;
             const jsonFileName = team.toLowerCase() + '.json';
@@ -739,6 +772,9 @@
                 fresh.style.width = '100%';
                 fresh.style.minHeight = '500px';
                 fresh.style.marginTop = '20px';
+                fresh.style.background = 'white';
+                fresh.style.borderRadius = '12px';
+                fresh.style.overflow = 'hidden';
                 
                 // Заменяем старый на новый
                 old.parentNode.replaceChild(fresh, old);
@@ -770,6 +806,31 @@
                 
                 const orderId = customerData.order_id;
                 const amount = 1000;
+
+                // Сохраняем заказ для возврата после T-Pay
+                const tgUser = getTelegramUser();
+                const pendingOrder = JSON.stringify({
+                    order_id: customerData.order_id,
+                    team: team,
+                    order_date: new Date().toLocaleString('ru-RU'),
+                    customer: {
+                        surname: customerData.surname,
+                        name: customerData.name,
+                        patronymic: customerData.patronymic,
+                        phone: customerData.phone,
+                        address: customerData.address,
+                        telegram: tgUser?.username ? '@' + tgUser.username : null,
+                        telegram_id: tgUser?.id || null
+                    },
+                    players: []
+                });
+                positionWrappers.forEach(wrapper => {
+                    const posDiv = wrapper.querySelector('.position');
+                    const labelDiv = wrapper.querySelector('.position-label');
+                    const playerName = fieldPositions.get(posDiv);
+                    if (playerName) pendingOrder.players.push({ position: labelDiv.textContent, name: playerName });
+                });
+                sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrder));
 
                 const initConfig = {
                     terminalKey: '1775395377330DEMO',

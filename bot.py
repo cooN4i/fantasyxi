@@ -107,7 +107,7 @@ def init_payment():
 
     body = request.json
     order_id = body.get("order_id")
-    amount = body.get("amount", 1000)
+    amount = body.get("amount", 100)
     customer_phone = body.get("phone") or "79999999999"
 
     payload = {
