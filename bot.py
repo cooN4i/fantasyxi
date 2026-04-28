@@ -231,20 +231,19 @@ def process_start(message):
 # ========== WEBHOOK ==========
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = request.get_json(silent=True)
+    try:
+        update = request.get_data(cache=False, as_text=True)
 
-    if not update:
-        return "OK"
+        if not update:
+            return "OK"
 
-    message = update.get('message')
-    if not message:
-        return "OK"
+        message = json.loads(update).get('message')
 
-    if 'web_app_data' in message:
-        task_queue.put((process_webapp_data, message))
+        if message:
+            task_queue.put(message)
 
-    elif message.get('text') == '/start':
-        task_queue.put((process_start, message))
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
 
     return "OK"
 
