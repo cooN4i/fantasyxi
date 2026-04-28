@@ -718,18 +718,34 @@
                 } catch (e) {
                     console.warn('destroy error', e);
                 }
-                // Ждём пока DOM очистится, затем пересоздаём контейнер
-                setTimeout(() => {
-                    paymentContainer.replaceChildren();
-                }, 100);
+                
+                // Агрессивная очистка: удаляем ВСЕХ потомков
+                while (paymentContainer.firstChild) {
+                    paymentContainer.removeChild(paymentContainer.firstChild);
+                }
+                
+                // Принудительно очищаем innerHTML
+                paymentContainer.innerHTML = '';
+                
                 paymentIntegrationInitialized = false;
             }
 
             function recreatePaymentContainer() {
                 const old = document.getElementById('paymentContainer');
-                const fresh = old.cloneNode(false);
+                
+                // Создаём полностью новый элемент
+                const fresh = document.createElement('div');
+                fresh.id = 'paymentContainer';
+                fresh.style.width = '100%';
+                fresh.style.minHeight = '500px';
+                fresh.style.marginTop = '20px';
+                
+                // Заменяем старый на новый
                 old.parentNode.replaceChild(fresh, old);
-                // Даём браузеру время перерисовать DOM
+                
+                // Обновляем глобальную ссылку
+                paymentContainer = fresh;
+                
                 return fresh;
             }
 
@@ -737,7 +753,7 @@
                 resetPaymentIntegration();
                 
                 // Небольшая задержка для полной очистки
-                await new Promise(resolve => setTimeout(resolve, 200));
+                await new Promise(resolve => setTimeout(resolve, 400));
                 
                 paymentContainer = recreatePaymentContainer();
                 

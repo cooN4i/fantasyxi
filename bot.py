@@ -212,7 +212,7 @@ def process_webapp_data(message):
         safe_send_message(
             chat_id,
             f"✅ Заказ №{order_id} успешно оформлен!\n\n"
-            f"📩 При возникновении вопросов напишите в поддержку.\n\n"
+            f"📩 При возникновении вопросов напишите в поддержку\n\n"
             f"Спасибо за выбор Fantasy XI 🫶",
             parse_mode="HTML",
             reply_markup=markup
@@ -237,8 +237,8 @@ def process_start(message):
         safe_send_message(
             chat_id,
             "👋 Привет!\n\n"
-            "Добро пожаловать в Fantasy Constructor - бот для создания футбольных составов.\n\n"
-            "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду.",
+            "Добро пожаловать в Fantasy XI - бот для создания футбольных составов\n\n"
+            "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду",
             reply_markup=markup
         )
 
@@ -281,7 +281,7 @@ def webhook():
         # Обрабатываем неизвестные сообщения
         gevent.spawn(process_unknown_message, message)
 
-    return jsonify({'ok': True})  # ⚡ мгновенный ответ Telegram
+    return jsonify({'ok': True})
 
 
 # ========== HEALTH ==========
