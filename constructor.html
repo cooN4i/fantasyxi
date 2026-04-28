@@ -273,6 +273,33 @@
             overflow: hidden;
             display: flex;
         }
+
+        /* Цвет курсора ввода для всех полей */
+        input, textarea {
+            caret-color: #000000;
+            color: #000000;
+        }
+
+        /* Для iOS Safari */
+        input:focus, textarea:focus {
+            caret-color: #007bff !important;
+            -webkit-text-fill-color: #000000;
+        }
+
+        /* Поля формы */
+        .form-group input {
+            caret-color: #007bff;
+        }
+
+        /* Телефонный инпут */
+        .iti input, .iti input:focus {
+            caret-color: #007bff !important;
+        }
+
+        /* Поле адреса DaData */
+        #address, #address:focus {
+            caret-color: #007bff !important;
+        }
     </style>
 </head>
 <body>
@@ -668,6 +695,9 @@
                 paymentInProgress = true;
                 showScreen('payment');
 
+                // ⚡ ВАЖНО: Сбрасываем интеграцию перед каждым открытием
+                resetPaymentIntegration();
+                
                 try {
                     await startPayment();
                 } finally {
@@ -688,27 +718,40 @@
                 } catch (e) {
                     console.warn('destroy error', e);
                 }
-                paymentContainer.replaceChildren();
+                // Ждём пока DOM очистится, затем пересоздаём контейнер
+                setTimeout(() => {
+                    paymentContainer.replaceChildren();
+                }, 100);
                 paymentIntegrationInitialized = false;
             }
+
             function recreatePaymentContainer() {
                 const old = document.getElementById('paymentContainer');
                 const fresh = old.cloneNode(false);
                 old.parentNode.replaceChild(fresh, old);
+                // Даём браузеру время перерисовать DOM
                 return fresh;
             }
+
             async function startPayment() {
                 resetPaymentIntegration();
+                
+                // Небольшая задержка для полной очистки
+                await new Promise(resolve => setTimeout(resolve, 200));
+                
                 paymentContainer = recreatePaymentContainer();
+                
                 if (!window.PaymentIntegration) {
                     alert('Платёжный модуль ещё не загружен, попробуйте через секунду');
                     showScreen('review');
                     return;
                 }
+                
                 if (paymentIntegrationInitialized) {
                     await PaymentIntegration.destroy?.();
                     paymentIntegrationInitialized = false;
                 }
+                
                 const orderId = customerData.order_id;
                 const amount = 1000;
 
@@ -740,9 +783,12 @@
                                             window.sendOrderToBot();
                                             paymentContainer.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
                                         } else if (status === 'REJECTED' || status === 'CANCELED') {
-                                            alert('❌ Оплата не прошла. Попробуйте снова.');
-                                            showScreen('review');
-                                            paymentContainer.innerHTML = '';
+                                            // Небольшая задержка перед возвратом
+                                            setTimeout(() => {
+                                                alert('❌ Оплата не прошла. Попробуйте снова.');
+                                                resetPaymentIntegration();
+                                                showScreen('review');
+                                            }, 500);
                                         }
                                     }
                                 }
@@ -750,14 +796,15 @@
                         }
                     }
                 };
+                
                 try {
                     await PaymentIntegration.init(initConfig);
                     paymentIntegrationInitialized = true;
                 } catch (err) {
                     console.error(err);
                     alert('Ошибка запуска оплаты: ' + (err.message || 'неизвестная ошибка'));
+                    resetPaymentIntegration();
                     showScreen('review');
-                    paymentContainer.innerHTML = '';
                 }
             }
         })();
