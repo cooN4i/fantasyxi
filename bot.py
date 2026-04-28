@@ -3,7 +3,9 @@ import json
 import logging
 import hashlib
 import requests
+import threading
 
+from queue import Queue
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -17,7 +19,6 @@ from telebot.types import (
 )
 
 from dotenv import load_dotenv
-from concurrent.futures import ThreadPoolExecutor
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -42,15 +43,12 @@ logger = logging.getLogger("bot")
 app = Flask(__name__)
 CORS(app)
 
-# ========== THREAD POOL (КЛЮЧЕВОЕ УСКОРЕНИЕ) ==========
-executor = ThreadPoolExecutor(max_workers=10)
-
-# ========== REQUESTS SESSION (CONNECTION POOL + RETRY) ==========
+# ========== REQUEST SESSION ==========
 session = requests.Session()
 
 retry = Retry(
-    total=3,
-    backoff_factor=0.3,
+    total=2,
+    backoff_factor=0.2,
     status_forcelist=[500, 502, 503, 504],
     allowed_methods=["POST", "GET"]
 )
@@ -64,15 +62,30 @@ adapter = HTTPAdapter(
 session.mount("https://", adapter)
 session.mount("http://", adapter)
 
-# ========== TELEGRAM BOT ==========
-bot = telebot.TeleBot(TOKEN, threaded=False)
-telebot.apihelper.session = session
+# ========== TELEGRAM ==========
+bot = telebot.TeleBot(TOKEN)
+
+# ========== QUEUE SYSTEM ==========
+task_queue = Queue()
+
+
+def worker():
+    while True:
+        fn, msg = task_queue.get()
+        try:
+            fn(msg)
+        except Exception as e:
+            logger.error(f"Worker error: {e}")
+        finally:
+            task_queue.task_done()
+
+
+threading.Thread(target=worker, daemon=True).start()
 
 # ========== HELPERS ==========
 
 
 def safe_send_message(chat_id, text, **kwargs):
-    """Telegram send with retry-safe session"""
     try:
         return bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
@@ -80,23 +93,17 @@ def safe_send_message(chat_id, text, **kwargs):
         return None
 
 
-def async_telegram_task(fn, *args, **kwargs):
-    """Запуск Telegram задач в фоне"""
-    executor.submit(fn, *args, **kwargs)
-
-
 def generate_token(data: dict, password: str):
-    data_for_token = {}
+    clean = {}
 
     for k, v in data.items():
         if isinstance(v, (dict, list)):
             continue
-        data_for_token[k] = v
+        clean[k] = v
 
-    data_for_token["Password"] = password
-
-    sorted_items = sorted(data_for_token.items())
-    concat = "".join(str(v) for k, v in sorted_items)
+    clean["Password"] = password
+    sorted_items = sorted(clean.items())
+    concat = "".join(str(v) for _, v in sorted_items)
 
     return hashlib.sha256(concat.encode()).hexdigest()
 
@@ -104,12 +111,10 @@ def generate_token(data: dict, password: str):
 # ========== PAYMENT ==========
 @app.route('/init-payment', methods=['POST'])
 def init_payment():
-    logger.info("💳 INIT PAYMENT")
-
     body = request.json
     order_id = body.get("order_id")
     amount = body.get("amount", 1000)
-    customer_phone = body.get("phone") or "79999999999"
+    phone = body.get("phone") or "79999999999"
 
     payload = {
         "TerminalKey": TERMINAL_KEY,
@@ -117,7 +122,7 @@ def init_payment():
         "OrderId": str(order_id),
         "Description": "Football Dream Team",
         "Receipt": {
-            "Phone": customer_phone,
+            "Phone": phone,
             "Taxation": "usn_income",
             "Items": [
                 {
@@ -135,10 +140,9 @@ def init_payment():
 
     try:
         resp = session.post(TINKOFF_INIT_URL, json=payload, timeout=5)
-        data = resp.json()
-        return jsonify({"PaymentURL": data.get("PaymentURL")})
+        return jsonify({"PaymentURL": resp.json().get("PaymentURL")})
     except Exception as e:
-        logger.error(f"❌ PAYMENT ERROR: {e}")
+        logger.error(f"Payment error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -155,7 +159,7 @@ def get_config():
     })
 
 
-# ========== TELEGRAM PROCESSORS (ASYNC) ==========
+# ========== BUSINESS LOGIC ==========
 def process_webapp_data(message):
     try:
         chat_id = message['chat']['id']
@@ -167,19 +171,13 @@ def process_webapp_data(message):
         customer = data.get("customer", {})
         players = data.get("players", [])
 
-        from_user = message.get('from', {})
+        tg = message.get('from', {})
 
-        tg_id = customer.get("telegram_id") or chat_id
         tg_username = customer.get("telegram") or (
-            "@" + from_user.get("username")
-            if from_user.get("username") else None
+            "@" + tg.get("username") if tg.get("username") else None
         )
 
-        customer_text = (
-            f"{customer.get('surname', '')} "
-            f"{customer.get('name', '')} "
-            f"{customer.get('patronymic', '')}"
-        ).strip()
+        customer_text = f"{customer.get('surname', '')} {customer.get('name', '')} {customer.get('patronymic', '')}"
 
         players_text = "\n".join(
             [f"• {p.get('position')}: {p.get('name')}" for p in players]
@@ -187,38 +185,29 @@ def process_webapp_data(message):
 
         admin_message = (
             f"📦 <b>Новый заказ №{order_id}</b>\n\n"
-            f"📅 {order_date}\n"
-            f"⚽ {team}\n\n"
+            f"⚽ {team}\n"
             f"👤 {customer_text}\n"
             f"📱 {tg_username or '—'}\n"
-            f"🆔 {tg_id}\n"
             f"📞 {customer.get('phone', '—')}\n"
             f"📍 {customer.get('address', '—')}\n\n"
             f"{players_text}"
         )
 
         if ADMIN_CHAT_ID:
-            safe_send_message(
-                ADMIN_CHAT_ID,
-                admin_message,
-                parse_mode="HTML"
-            )
+            safe_send_message(ADMIN_CHAT_ID, admin_message, parse_mode="HTML")
 
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(
-            "📩 Написать в поддержку",
-            url="https://t.me/kylo_gg"
-        ))
+            "📩 Поддержка", url="https://t.me/kylo_gg"))
 
         safe_send_message(
             chat_id,
-            f"✅ Заказ №{order_id} успешно оформлен!\n\n📩 При возникновении вопросов напишите в поддержку.\n\nСпасибо за выбор Fantasy XI 🫶",
-            parse_mode="HTML",
+            f"✅ Заказ №{order_id} оформлен!",
             reply_markup=markup
         )
 
     except Exception as e:
-        logger.error(f"❌ web_app_data error: {e}")
+        logger.error(f"web_app_data error: {e}")
 
 
 def process_start(message):
@@ -227,46 +216,37 @@ def process_start(message):
 
         markup = ReplyKeyboardMarkup(resize_keyboard=True)
         web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/")
-        button = KeyboardButton(
-            text="⚽ Открыть конструктор",
-            web_app=web_app
-        )
-        markup.add(button)
+        markup.add(KeyboardButton("⚽ Открыть конструктор", web_app=web_app))
 
         safe_send_message(
             chat_id,
-            "👋 Привет!\n\n"
-            "Добро пожаловать в Fantasy Constructor - бот для создания футбольных составов.\n\n"
-            "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду.",
+            "👋 Привет! Открой конструктор команды 👇",
             reply_markup=markup
         )
 
     except Exception as e:
-        logger.error(f"❌ start error: {e}")
+        logger.error(f"start error: {e}")
 
 
 # ========== WEBHOOK ==========
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update_json = request.get_json(silent=True)
+    update = request.get_json(silent=True)
 
-    if not update_json:
-        return jsonify({'ok': True})
+    if not update:
+        return "OK"
 
-    logger.info("🔥 WEBHOOK RECEIVED")
-
-    message = update_json.get('message')
+    message = update.get('message')
     if not message:
-        return jsonify({'ok': True})
+        return "OK"
 
-    # ⚡ ВАЖНО: ВСЁ УХОДИТ В ФОН
     if 'web_app_data' in message:
-        executor.submit(process_webapp_data, message)
+        task_queue.put((process_webapp_data, message))
 
-    elif 'text' in message and message.get('text') == '/start':
-        executor.submit(process_start, message)
+    elif message.get('text') == '/start':
+        task_queue.put((process_start, message))
 
-    return jsonify({'ok': True})  # ⚡ мгновенный ответ Telegram
+    return "OK"
 
 
 # ========== HEALTH ==========
@@ -284,7 +264,7 @@ def index():
 def set_webhook():
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
-    logger.info("✅ Webhook set")
+    logger.info("Webhook set")
 
 
 if __name__ == "__main__":
