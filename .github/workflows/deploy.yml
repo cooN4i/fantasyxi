@@ -38,6 +38,10 @@ jobs:
           echo "Pulling latest code..."
           git pull origin main
           
+          echo "Fixing permissions for nginx..."
+          chown -R www-data:www-data /root/fantasyxi
+          chmod 755 /root
+          
           echo "Activating virtualenv..."
           source venv/bin/activate
           
