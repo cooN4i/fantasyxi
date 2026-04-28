@@ -35,6 +35,9 @@ jobs:
           echo "Entering project directory..."
           cd ~/fantasyxi
           
+          echo "Fixing git safe directory..."
+          git config --global --add safe.directory /root/fantasyxi
+          
           echo "Pulling latest code..."
           git pull origin main
           
