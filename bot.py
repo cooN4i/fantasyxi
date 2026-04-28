@@ -1,11 +1,10 @@
+import gevent
 import os
 import json
 import logging
 import hashlib
 import requests
-import threading
 
-from queue import Queue
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -43,12 +42,14 @@ logger = logging.getLogger("bot")
 app = Flask(__name__)
 CORS(app)
 
-# ========== REQUEST SESSION ==========
+# ========== GEVENT GREENLET (СОВМЕСТИМО С GUNICORN GEVENT) ==========
+
+# ========== REQUESTS SESSION (CONNECTION POOL + RETRY) ==========
 session = requests.Session()
 
 retry = Retry(
-    total=2,
-    backoff_factor=0.2,
+    total=3,
+    backoff_factor=0.3,
     status_forcelist=[500, 502, 503, 504],
     allowed_methods=["POST", "GET"]
 )
@@ -62,30 +63,15 @@ adapter = HTTPAdapter(
 session.mount("https://", adapter)
 session.mount("http://", adapter)
 
-# ========== TELEGRAM ==========
-bot = telebot.TeleBot(TOKEN)
-
-# ========== QUEUE SYSTEM ==========
-task_queue = Queue()
-
-
-def worker():
-    while True:
-        fn, msg = task_queue.get()
-        try:
-            fn(msg)
-        except Exception as e:
-            logger.error(f"Worker error: {e}")
-        finally:
-            task_queue.task_done()
-
-
-threading.Thread(target=worker, daemon=True).start()
+# ========== TELEGRAM BOT ==========
+bot = telebot.TeleBot(TOKEN, threaded=False)
+telebot.apihelper.session = session
 
 # ========== HELPERS ==========
 
 
 def safe_send_message(chat_id, text, **kwargs):
+    """Telegram send with retry-safe session"""
     try:
         return bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
@@ -93,17 +79,23 @@ def safe_send_message(chat_id, text, **kwargs):
         return None
 
 
+def async_telegram_task(fn, *args, **kwargs):
+    """Запуск Telegram задач через gevent (совместимо с gunicorn gevent)"""
+    gevent.spawn(fn, *args, **kwargs)
+
+
 def generate_token(data: dict, password: str):
-    clean = {}
+    data_for_token = {}
 
     for k, v in data.items():
         if isinstance(v, (dict, list)):
             continue
-        clean[k] = v
+        data_for_token[k] = v
 
-    clean["Password"] = password
-    sorted_items = sorted(clean.items())
-    concat = "".join(str(v) for _, v in sorted_items)
+    data_for_token["Password"] = password
+
+    sorted_items = sorted(data_for_token.items())
+    concat = "".join(str(v) for k, v in sorted_items)
 
     return hashlib.sha256(concat.encode()).hexdigest()
 
@@ -111,10 +103,12 @@ def generate_token(data: dict, password: str):
 # ========== PAYMENT ==========
 @app.route('/init-payment', methods=['POST'])
 def init_payment():
+    logger.info("💳 INIT PAYMENT")
+
     body = request.json
     order_id = body.get("order_id")
     amount = body.get("amount", 1000)
-    phone = body.get("phone") or "79999999999"
+    customer_phone = body.get("phone") or "79999999999"
 
     payload = {
         "TerminalKey": TERMINAL_KEY,
@@ -122,7 +116,7 @@ def init_payment():
         "OrderId": str(order_id),
         "Description": "Football Dream Team",
         "Receipt": {
-            "Phone": phone,
+            "Phone": customer_phone,
             "Taxation": "usn_income",
             "Items": [
                 {
@@ -140,9 +134,10 @@ def init_payment():
 
     try:
         resp = session.post(TINKOFF_INIT_URL, json=payload, timeout=5)
-        return jsonify({"PaymentURL": resp.json().get("PaymentURL")})
+        data = resp.json()
+        return jsonify({"PaymentURL": data.get("PaymentURL")})
     except Exception as e:
-        logger.error(f"Payment error: {e}")
+        logger.error(f"❌ PAYMENT ERROR: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -159,7 +154,7 @@ def get_config():
     })
 
 
-# ========== BUSINESS LOGIC ==========
+# ========== TELEGRAM PROCESSORS (GREENLET-BASED) ==========
 def process_webapp_data(message):
     try:
         chat_id = message['chat']['id']
@@ -171,13 +166,19 @@ def process_webapp_data(message):
         customer = data.get("customer", {})
         players = data.get("players", [])
 
-        tg = message.get('from', {})
+        from_user = message.get('from', {})
 
+        tg_id = customer.get("telegram_id") or chat_id
         tg_username = customer.get("telegram") or (
-            "@" + tg.get("username") if tg.get("username") else None
+            "@" + from_user.get("username")
+            if from_user.get("username") else None
         )
 
-        customer_text = f"{customer.get('surname', '')} {customer.get('name', '')} {customer.get('patronymic', '')}"
+        customer_text = (
+            f"{customer.get('surname', '')} "
+            f"{customer.get('name', '')} "
+            f"{customer.get('patronymic', '')}"
+        ).strip()
 
         players_text = "\n".join(
             [f"• {p.get('position')}: {p.get('name')}" for p in players]
@@ -185,29 +186,38 @@ def process_webapp_data(message):
 
         admin_message = (
             f"📦 <b>Новый заказ №{order_id}</b>\n\n"
-            f"⚽ {team}\n"
+            f"📅 {order_date}\n"
+            f"⚽ {team}\n\n"
             f"👤 {customer_text}\n"
             f"📱 {tg_username or '—'}\n"
+            f"🆔 {tg_id}\n"
             f"📞 {customer.get('phone', '—')}\n"
             f"📍 {customer.get('address', '—')}\n\n"
             f"{players_text}"
         )
 
         if ADMIN_CHAT_ID:
-            safe_send_message(ADMIN_CHAT_ID, admin_message, parse_mode="HTML")
+            safe_send_message(
+                ADMIN_CHAT_ID,
+                admin_message,
+                parse_mode="HTML"
+            )
 
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(
-            "📩 Поддержка", url="https://t.me/kylo_gg"))
+            "📩 Написать в поддержку",
+            url="https://t.me/kylo_gg"
+        ))
 
         safe_send_message(
             chat_id,
-            f"✅ Заказ №{order_id} оформлен!",
+            f"✅ <b>Спасибо за заказ!</b>\n\n📦 №{order_id}",
+            parse_mode="HTML",
             reply_markup=markup
         )
 
     except Exception as e:
-        logger.error(f"web_app_data error: {e}")
+        logger.error(f"❌ web_app_data error: {e}")
 
 
 def process_start(message):
@@ -216,36 +226,58 @@ def process_start(message):
 
         markup = ReplyKeyboardMarkup(resize_keyboard=True)
         web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/")
-        markup.add(KeyboardButton("⚽ Открыть конструктор", web_app=web_app))
+        button = KeyboardButton(
+            text="⚽ Открыть конструктор",
+            web_app=web_app
+        )
+        markup.add(button)
 
         safe_send_message(
             chat_id,
-            "👋 Привет! Открой конструктор команды 👇",
+            "Нажмите кнопку ниже 👇",
             reply_markup=markup
         )
 
     except Exception as e:
-        logger.error(f"start error: {e}")
+        logger.error(f"❌ start error: {e}")
+
+
+def process_unknown_message(message):
+    """Обработка неизвестных сообщений"""
+    try:
+        chat_id = message['chat']['id']
+        safe_send_message(
+            chat_id,
+            "Используйте кнопку меню или команду /start для начала работы"
+        )
+    except Exception as e:
+        logger.error(f"❌ unknown message error: {e}")
 
 
 # ========== WEBHOOK ==========
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    try:
-        update = request.get_data(cache=False, as_text=True)
+    update_json = request.get_json(silent=True)
 
-        if not update:
-            return "OK"
+    if not update_json:
+        return jsonify({'ok': True})
 
-        message = json.loads(update).get('message')
+    logger.info("🔥 WEBHOOK RECEIVED")
 
-        if message:
-            task_queue.put(message)
+    message = update_json.get('message')
+    if not message:
+        return jsonify({'ok': True})
 
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
+    # ⚡ GEVENT-СОВМЕСТИМЫЙ ЗАПУСК В ФОНЕ
+    if 'web_app_data' in message:
+        gevent.spawn(process_webapp_data, message)
+    elif 'text' in message and message.get('text') == '/start':
+        gevent.spawn(process_start, message)
+    else:
+        # Обрабатываем неизвестные сообщения
+        gevent.spawn(process_unknown_message, message)
 
-    return "OK"
+    return jsonify({'ok': True})  # ⚡ мгновенный ответ Telegram
 
 
 # ========== HEALTH ==========
@@ -263,7 +295,7 @@ def index():
 def set_webhook():
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
-    logger.info("Webhook set")
+    logger.info("✅ Webhook set")
 
 
 if __name__ == "__main__":

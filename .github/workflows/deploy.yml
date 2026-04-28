@@ -33,7 +33,7 @@ jobs:
           set -e
           
           echo "Entering project directory..."
-          cd ~/football-bot
+          cd ~/fantasyxi
           
           echo "Pulling latest code..."
           git pull origin main
