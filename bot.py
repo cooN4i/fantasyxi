@@ -211,7 +211,9 @@ def process_webapp_data(message):
 
         safe_send_message(
             chat_id,
-            f"✅ <b>Спасибо за заказ!</b>\n\n📦 №{order_id}",
+            f"✅ Заказ №{order_id} успешно оформлен!\n\n"
+            f"📩 При возникновении вопросов напишите в поддержку.\n\n"
+            f"Спасибо за выбор Fantasy XI 🫶",
             parse_mode="HTML",
             reply_markup=markup
         )
@@ -234,7 +236,9 @@ def process_start(message):
 
         safe_send_message(
             chat_id,
-            "Нажмите кнопку ниже 👇",
+            "👋 Привет!\n\n"
+            "Добро пожаловать в Fantasy Constructor - бот для создания футбольных составов.\n\n"
+            "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду.",
             reply_markup=markup
         )
 
