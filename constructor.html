@@ -809,7 +809,7 @@
 
                 // Сохраняем заказ для возврата после T-Pay
                 const tgUser = getTelegramUser();
-                const pendingOrder = JSON.stringify({
+                const pendingOrderObj = {
                     order_id: customerData.order_id,
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
@@ -823,14 +823,14 @@
                         telegram_id: tgUser?.id || null
                     },
                     players: []
-                });
+                };
                 positionWrappers.forEach(wrapper => {
                     const posDiv = wrapper.querySelector('.position');
                     const labelDiv = wrapper.querySelector('.position-label');
                     const playerName = fieldPositions.get(posDiv);
-                    if (playerName) pendingOrder.players.push({ position: labelDiv.textContent, name: playerName });
+                    if (playerName) pendingOrderObj.players.push({ position: labelDiv.textContent, name: playerName });
                 });
-                sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrder));
+                sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrderObj));
 
                 const initConfig = {
                     terminalKey: '1775395377330DEMO',
