@@ -363,39 +363,13 @@
         </div>
     </div>
 
-    <script src="https://integrationjs.t-static.ru/integration.js"></script>
-
     <script>
         (function() {
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
             let orderAlreadySent = false;
-            // ========== ВОЗВРАТ ПОСЛЕ ОПЛАТЫ ==========
-            const urlParams = new URLSearchParams(window.location.search);
-            const paymentStatus = urlParams.get('Success');
 
-            if (paymentStatus === 'true') {
-                if (orderAlreadySent) return;
-                orderAlreadySent = true;
-                let savedOrder = sessionStorage.getItem('pendingOrder');
-                if (!savedOrder) savedOrder = localStorage.getItem('pendingOrder');
-                if (savedOrder) {
-                    try {
-                        const orderData = JSON.parse(savedOrder);
-                        Telegram.WebApp.sendData(JSON.stringify(orderData));
-                        sessionStorage.removeItem('pendingOrder');
-                        localStorage.removeItem('pendingOrder');
-                        document.body.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
-                        setTimeout(() => Telegram.WebApp.close(), 2000);
-                    } catch(e) {
-                        console.error('Send error:', e);
-                    }
-                }
-                return;
-            }
-
-            if (paymentStatus === 'false') {
-                alert('❌ Оплата не прошла. Попробуйте снова.');
-            }
+            // Больше не обрабатываем успех по URL – оплата будет подтверждена через бота
+            // (вебхук /payment-notification)
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
             let backendConfig = null;
@@ -522,6 +496,8 @@
                 return unsafe?.user || null;
             }
 
+            // Эта функция больше не вызывается из платёжного потока,
+            // но оставлена на случай отправки данных напрямую (не используется)
             window.sendOrderToBot = function() {
                 if (orderAlreadySent) return;
 
@@ -708,6 +684,7 @@
                 }
             }
 
+            const urlParams = new URLSearchParams(window.location.search);
             let team = urlParams.get('team') || 'Барселона';
             document.getElementById('team-title').textContent = `Состав ${team}`;
             const jsonFileName = team.toLowerCase() + '.json';
@@ -751,53 +728,13 @@
                 updateOrderButtonVisibility();
             }
 
-            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ (ТОЛЬКО IFRAME) ==========
-            let terminalKey = null;
-            let currentPaymentId = null;
-
+            // ========== НОВАЯ ПЛАТЁЖНАЯ ЛОГИКА ==========
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
                 paymentInProgress = true;
-                document.activeElement?.blur();
-
-                if (!backendConfig) {
-                    try { await loadConfig(); } catch(e) {}
-                }
-                terminalKey = backendConfig?.terminalKey || '1775395377330DEMO';
-
-                // Уничтожаем предыдущую интеграцию
-                if (window.PaymentIntegration) {
-                    try { PaymentIntegration.destroy(); } catch(e) {}
-                }
-                document.getElementById('cardWidget').innerHTML = '';
-                currentPaymentId = null;
-
-                showScreen('payment');
-                await new Promise(r => setTimeout(r, 100));
-                await startPayment();
-                paymentInProgress = false;
-            });
-
-            document.getElementById('backToReviewFromPayment').addEventListener('click', () => {
-                if (window.PaymentIntegration) {
-                    try { PaymentIntegration.destroy(); } catch(e) {}
-                }
-                document.getElementById('cardWidget').innerHTML = '';
-                currentPaymentId = null;
-                showScreen('review');
-            });
-
-            async function startPayment() {
-                if (!window.PaymentIntegration) {
-                    alert('Платёжный модуль не загружен. Попробуйте обновить страницу.');
-                    showScreen('review');
-                    return;
-                }
 
                 const tgUser = getTelegramUser();
-
                 const pendingOrderObj = {
-                    order_id: null, // пока нет
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
                     customer: {
@@ -811,7 +748,6 @@
                     },
                     players: []
                 };
-
                 positionWrappers.forEach(wrapper => {
                     const posDiv = wrapper.querySelector('.position');
                     const labelDiv = wrapper.querySelector('.position-label');
@@ -824,104 +760,54 @@
                     }
                 });
 
-                let paymentUrl, orderId;
-
                 try {
                     const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             phone: customerData.phone,
-                            success_url: window.location.origin + window.location.pathname + '?Success=true',
-                            fail_url: window.location.origin + window.location.pathname + '?Success=false',
-                            order_data: pendingOrderObj // ✅ теперь всё ок
+                            order_data: pendingOrderObj
                         })
                     });
-
                     const data = await resp.json();
+                    if (!data.PaymentURL || !data.order_id) throw new Error('Invalid response');
 
-                    if (!data.PaymentURL || !data.order_id) {
-                        throw new Error('Invalid response');
+                    pendingOrderObj.order_id = data.order_id;
+                    // Сохраняем на случай, если потребуется восстановить заказ (не обязательно)
+                    sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrderObj));
+
+                    // Открываем платёжную ссылку в системном браузере
+                    if (window.Telegram && Telegram.WebApp) {
+                        Telegram.WebApp.openLink(data.PaymentURL, { try_instant_view: false });
+                    } else {
+                        window.open(data.PaymentURL, '_blank');
                     }
 
-                    paymentUrl = data.PaymentURL;
-                    orderId = data.order_id;
-
-                    customerData.order_id = orderId;
-                    pendingOrderObj.order_id = orderId; // 👈 ДОБАВЬ ЭТО
+                    // Показываем экран оплаты с пояснением и кнопкой «Вернуться в чат»
+                    showScreen('payment');
+                    document.getElementById('paymentContainer').innerHTML = `
+                        <div style="text-align:center; padding:30px;">
+                            <h3>✅ Платёж открыт в браузере</h3>
+                            <p>После оплаты вернитесь в чат с ботом – придёт подтверждение.</p>
+                            <button class="action-button order-button" id="closeAfterPayment">Вернуться в чат</button>
+                        </div>`;
+                    document.getElementById('closeAfterPayment').addEventListener('click', () => {
+                        Telegram.WebApp.close();
+                    });
 
                 } catch(e) {
                     console.error(e);
-                    alert('Ошибка создания платежа');
+                    alert('Ошибка создания платежа, попробуйте ещё раз.');
                     showScreen('review');
-                    return;
+                } finally {
+                    paymentInProgress = false;
                 }
+            });
 
-                const orderStr = JSON.stringify(pendingOrderObj);
-                sessionStorage.setItem('pendingOrder', orderStr);
-                localStorage.setItem('pendingOrder', orderStr);
-
-                currentPaymentId = orderId;
-
-                const statusChanged = (status) => {
-                    if (currentPaymentId !== orderId) return;
-
-                    if (status === 'SUCCESS') {
-                        window.sendOrderToBot();
-
-                        document.getElementById('paymentContainer').innerHTML =
-                            '<div style="text-align:center; padding:40px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
-
-                        sessionStorage.removeItem('pendingOrder');
-                        localStorage.removeItem('pendingOrder');
-
-                    } else if (status === 'REJECTED' || status === 'CANCELED') {
-                        setTimeout(() => {
-                            alert('❌ Оплата не прошла. Попробуйте снова.');
-
-                            if (window.PaymentIntegration) {
-                                try { PaymentIntegration.destroy(); } catch(e) {}
-                            }
-
-                            document.getElementById('cardWidget').innerHTML = '';
-                            showScreen('review');
-
-                            sessionStorage.removeItem('pendingOrder');
-                            localStorage.removeItem('pendingOrder');
-
-                        }, 500);
-                    }
-                };
-
-                const initConfig = {
-                    terminalKey: terminalKey,
-                    product: 'eacq',
-                    features: {
-                        iframe: {
-                            container: document.getElementById('cardWidget'),
-                            paymentStartCallback: async () => paymentUrl,
-                            config: {
-                                status: {
-                                    changedCallback: statusChanged
-                                }
-                            }
-                        }
-                    }
-                };
-
-                try {
-                    await PaymentIntegration.init(initConfig);
-                } catch(err) {
-                    console.error('Payment init error:', err);
-
-                    alert('Ошибка запуска оплаты: ' + (err.message || 'неизвестная ошибка'));
-
-                    showScreen('review');
-
-                    sessionStorage.removeItem('pendingOrder');
-                    localStorage.removeItem('pendingOrder');
-                }
-            }
+            // Кнопка «Назад» на экране оплаты возвращает на проверку заказа
+            document.getElementById('backToReviewFromPayment').addEventListener('click', () => {
+                showScreen('review');
+            });
 
             // ========== ЗАПУСК ==========
             (async function main() {
