@@ -743,8 +743,8 @@
                         patronymic: customerData.patronymic,
                         phone: customerData.phone,
                         address: customerData.address,
-                        telegram: tgUser.username ? '@' + tgUser.username : null,
-                        telegram_id: tgUser.id       // теперь точно число
+                        telegram: tgUser?.username ? '@' + tgUser.username : null,
+                        telegram_id: tgUser?.id || null
                     },
                     players: []
                 };
@@ -773,33 +773,27 @@
                     if (!data.PaymentURL || !data.order_id) throw new Error('Invalid response');
 
                     pendingOrderObj.order_id = data.order_id;
+                    // Сохраняем на случай, если потребуется восстановить заказ (не обязательно)
                     sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrderObj));
 
-                    // Показываем экран оплаты с таймером
+                    // Открываем платёжную ссылку в системном браузере
+                    if (window.Telegram && Telegram.WebApp) {
+                        Telegram.WebApp.openLink(data.PaymentURL, { try_instant_view: false });
+                    } else {
+                        window.open(data.PaymentURL, '_blank');
+                    }
+
+                    // Показываем экран оплаты с пояснением и кнопкой «Вернуться в чат»
                     showScreen('payment');
                     document.getElementById('paymentContainer').innerHTML = `
                         <div style="text-align:center; padding:30px;">
-                            <h3>⏳ Открываем платёж...</h3>
-                            <p>Платёж откроется в браузере через 3 секунды.<br>Пожалуйста, после оплаты вернитесь в чат с ботом.</p>
+                            <h3>✅ Платёж открыт в браузере</h3>
+                            <p>После оплаты вернитесь в чат с ботом – придёт подтверждение.</p>
+                            <button class="action-button order-button" id="closeAfterPayment">Вернуться в чат</button>
                         </div>`;
-
-                    // Через 3 секунды открываем ссылку и обновляем текст
-                    setTimeout(() => {
-                        if (window.Telegram && Telegram.WebApp) {
-                            Telegram.WebApp.openLink(data.PaymentURL, { try_instant_view: false });
-                        } else {
-                            window.open(data.PaymentURL, '_blank');
-                        }
-                        document.getElementById('paymentContainer').innerHTML = `
-                            <div style="text-align:center; padding:30px;">
-                                <h3>✅ Платёж открыт в браузере</h3>
-                                <p>После оплаты вернитесь в чат с ботом – придёт подтверждение.</p>
-                                <button class="action-button order-button" id="closeAfterPayment">Вернуться в чат</button>
-                            </div>`;
-                        document.getElementById('closeAfterPayment').addEventListener('click', () => {
-                            if (window.Telegram && Telegram.WebApp) Telegram.WebApp.close();
-                        });
-                    }, 3000);
+                    document.getElementById('closeAfterPayment').addEventListener('click', () => {
+                        Telegram.WebApp.close();
+                    });
 
                 } catch(e) {
                     console.error(e);
