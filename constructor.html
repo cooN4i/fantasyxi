@@ -369,25 +369,14 @@
         (function() {
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
 
-            // ========== ВОЗВРАТ ПОСЛЕ ОПЛАТЫ ==========
+            // ========== ВОЗВРАТ ПОСЛЕ ОПЛАТЫ (оставлен для совместимости, но больше не используется) ==========
             const urlParams = new URLSearchParams(window.location.search);
             const paymentStatus = urlParams.get('Success');
 
             if (paymentStatus === 'true') {
-                let savedOrder = sessionStorage.getItem('pendingOrder');
-                if (!savedOrder) savedOrder = localStorage.getItem('pendingOrder');
-                if (savedOrder) {
-                    try {
-                        const orderData = JSON.parse(savedOrder);
-                        Telegram.WebApp.sendData(JSON.stringify(orderData));
-                        sessionStorage.removeItem('pendingOrder');
-                        localStorage.removeItem('pendingOrder');
-                        document.body.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
-                        setTimeout(() => Telegram.WebApp.close(), 2000);
-                    } catch(e) {
-                        console.error('Send error:', e);
-                    }
-                }
+                // Больше не вызываем sendOrderToBot, просто показываем сообщение
+                document.body.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
+                setTimeout(() => Telegram.WebApp.close(), 2000);
                 return;
             }
 
@@ -520,6 +509,7 @@
                 return unsafe?.user || null;
             }
 
+            // Функция sendOrderToBot больше не используется, но оставлена на всякий случай
             window.sendOrderToBot = function() {
                 if (!window.Telegram || !Telegram.WebApp) {
                     alert("❌ Telegram WebApp недоступен");
@@ -552,8 +542,7 @@
                 });
                 try {
                     Telegram.WebApp.sendData(JSON.stringify(composition));
-                    setTimeout(() => Telegram.WebApp.close(), 2000);
-                } catch(e) { alert('Ошибка отправки: ' + e.message); }
+                } catch(e) { console.error(e); }
             };
 
             function showReviewScreen() {
@@ -789,32 +778,9 @@
                     return;
                 }
 
-                let paymentUrl, orderId;
-                try {
-                    const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            phone: customerData.phone,
-                            success_url: window.location.origin + window.location.pathname + '?Success=true',
-                            fail_url: window.location.origin + window.location.pathname + '?Success=false'
-                        })
-                    });
-                    const data = await resp.json();
-                    if (!data.PaymentURL || !data.order_id) throw new Error('Invalid response');
-                    paymentUrl = data.PaymentURL;
-                    orderId = data.order_id;
-                    customerData.order_id = orderId;
-                } catch(e) {
-                    console.error(e);
-                    alert('Ошибка создания платежа');
-                    showScreen('review');
-                    return;
-                }
-
+                // Подготавливаем полный объект заказа для отправки на сервер
                 const tgUser = getTelegramUser();
-                const pendingOrderObj = {
-                    order_id: orderId,
+                const orderDataForServer = {
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
                     customer: {
@@ -832,12 +798,37 @@
                     const posDiv = wrapper.querySelector('.position');
                     const labelDiv = wrapper.querySelector('.position-label');
                     const playerName = fieldPositions.get(posDiv);
-                    if (playerName) pendingOrderObj.players.push({
+                    if (playerName) orderDataForServer.players.push({
                         position: labelDiv.textContent,
                         name: playerName
                     });
                 });
-                const orderStr = JSON.stringify(pendingOrderObj);
+
+                let paymentUrl, orderId;
+                try {
+                    const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            phone: customerData.phone,
+                            // success_url больше не нужны, бэкенд сам всё сделает
+                            order_data: orderDataForServer
+                        })
+                    });
+                    const data = await resp.json();
+                    if (!data.PaymentURL || !data.order_id) throw new Error('Invalid response');
+                    paymentUrl = data.PaymentURL;
+                    orderId = data.order_id;
+                    customerData.order_id = orderId;
+                } catch(e) {
+                    console.error(e);
+                    alert('Ошибка создания платежа');
+                    showScreen('review');
+                    return;
+                }
+
+                // Сохраняем заказ локально на всякий случай (не обязательно)
+                const orderStr = JSON.stringify({...orderDataForServer, order_id: orderId});
                 sessionStorage.setItem('pendingOrder', orderStr);
                 localStorage.setItem('pendingOrder', orderStr);
 
@@ -846,11 +837,17 @@
                 const statusChanged = (status) => {
                     if (currentPaymentId !== orderId) return;
                     if (status === 'SUCCESS') {
-                        window.sendOrderToBot();
+                        // Больше не вызываем sendOrderToBot, сервер сам отправит уведомления
                         document.getElementById('paymentContainer').innerHTML =
                             '<div style="text-align:center; padding:40px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
                         sessionStorage.removeItem('pendingOrder');
                         localStorage.removeItem('pendingOrder');
+                        // Можно закрыть мини-приложение
+                        setTimeout(() => {
+                            if (window.Telegram && Telegram.WebApp) {
+                                Telegram.WebApp.close();
+                            }
+                        }, 2000);
                     } else if (status === 'REJECTED' || status === 'CANCELED') {
                         setTimeout(() => {
                             alert('❌ Оплата не прошла. Попробуйте снова.');
@@ -865,7 +862,7 @@
                     }
                 };
 
-                // ТОЛЬКО IFRAME (все быстрые кнопки внутри)
+                // Конфигурация iframe (без изменений в виджетах)
                 const initConfig = {
                     terminalKey: terminalKey,
                     product: 'eacq',

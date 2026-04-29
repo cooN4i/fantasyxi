@@ -6,7 +6,7 @@ import hashlib
 import random
 import requests
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string, url_for
 from flask_cors import CORS
 
 import telebot
@@ -42,6 +42,9 @@ logger = logging.getLogger("bot")
 # ========== FLASK ==========
 app = Flask(__name__)
 CORS(app)
+
+# Хранилище ожидающих оплаты заказов (в продакшене лучше Redis)
+app.config['pending_orders'] = {}
 
 # ========== REQUESTS SESSION ==========
 session = requests.Session()
@@ -94,14 +97,21 @@ def generate_token(data: dict, password: str):
 @app.route('/init-payment', methods=['POST'])
 def init_payment():
     logger.info("💳 INIT PAYMENT")
-
     body = request.json
     customer_phone = body.get("phone") or "79999999999"
-    success_url = body.get("success_url")
-    fail_url = body.get("fail_url")
+    order_data = body.get("order_data")
+    if not order_data:
+        return jsonify({"error": "order_data is required"}), 400
 
-    # Генерируем случайный номер заказа (число от 1 до 10000)
+    # Генерируем уникальный номер заказа (число от 1 до 10000)
     order_id = str(random.randint(1, 10000))
+
+    # Сохраняем заказ на сервере
+    app.config['pending_orders'][order_id] = order_data
+
+    # Формируем SuccessURL, который указывает на маршрут /payment-success
+    success_url = url_for(
+        'payment_success', _external=True) + f'?order_id={order_id}'
 
     AMOUNT = 1000  # копейки
 
@@ -122,13 +132,13 @@ def init_payment():
                     "Tax": "none"
                 }
             ]
-        }
+        },
+        "SuccessURL": success_url
     }
 
-    if success_url:
-        payload["SuccessURL"] = success_url
-    if fail_url:
-        payload["FailURL"] = fail_url
+    # FailURL можно тоже добавить при желании
+    # fail_url = url_for('payment_fail', _external=True) + f'?order_id={order_id}'
+    # payload["FailURL"] = fail_url
 
     payload["Token"] = generate_token(payload, PASSWORD)
 
@@ -144,6 +154,66 @@ def init_payment():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/payment-success')
+def payment_success():
+    order_id = request.args.get('order_id')
+    logger.info(f"✅ Payment success for order_id: {order_id}")
+
+    if not order_id:
+        return "Order ID missing", 400
+
+    order = app.config['pending_orders'].pop(order_id, None)
+    if not order:
+        return "Заказ уже обработан или не найден", 404
+
+    # Отправляем сообщение клиенту
+    try:
+        chat_id = order['customer']['telegram_id']
+        if chat_id:
+            customer_text = (
+                f"{order['customer'].get('surname', '')} "
+                f"{order['customer'].get('name', '')} "
+                f"{order['customer'].get('patronymic', '')}"
+            ).strip()
+            players_text = "\n".join(
+                [f"• {p.get('position')}: {p.get('name')}" for p in order.get(
+                    'players', [])]
+            )
+            message = (
+                f"✅ Заказ №{order_id} успешно оплачен!\n\n"
+                f"📅 {order.get('order_date', '')}\n"
+                f"👤 {customer_text}\n"
+                f"📞 {order['customer'].get('phone', '—')}\n"
+                f"📍 {order['customer'].get('address', '—')}\n\n"
+                f"{players_text}"
+            )
+            safe_send_message(chat_id, message)
+    except Exception as e:
+        logger.error(f"Failed to notify customer: {e}")
+
+    # Отправляем уведомление администратору
+    try:
+        if ADMIN_CHAT_ID:
+            admin_msg = (
+                f"📦 <b>Оплачен заказ №{order_id}</b>\n\n"
+                f"<pre>{json.dumps(order, indent=2, ensure_ascii=False)}</pre>"
+            )
+            safe_send_message(ADMIN_CHAT_ID, admin_msg, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Failed to notify admin: {e}")
+
+    # Показываем пользователю страницу с подтверждением
+    return render_template_string('''
+        <html>
+        <head><meta charset="utf-8"><title>Оплата прошла</title></head>
+        <body style="font-family:sans-serif;text-align:center;padding:40px;">
+            <h2>✅ Оплата прошла успешно!</h2>
+            <p>Спасибо за заказ. Можете закрыть это окно и вернуться в бот.</p>
+        </body>
+        </html>
+    ''')
+
+
 @app.route('/get-dadata-token', methods=['GET'])
 def get_dadata_token():
     return jsonify({"token": DADATA_TOKEN})
@@ -157,9 +227,8 @@ def get_config():
         "terminalKey": TERMINAL_KEY
     })
 
-# ========== TELEGRAM PROCESSORS (без изменений) ==========
 
-
+# ========== TELEGRAM PROCESSORS ==========
 def process_webapp_data(message):
     try:
         chat_id = message['chat']['id']
@@ -261,9 +330,8 @@ def process_unknown_message(message):
     except Exception as e:
         logger.error(f"❌ unknown message error: {e}")
 
+
 # ========== WEBHOOK ==========
-
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update_json = request.get_json(silent=True)
@@ -286,9 +354,8 @@ def webhook():
 
     return jsonify({'ok': True})
 
+
 # ========== HEALTH ==========
-
-
 @app.route('/health')
 def health():
     return "OK", 200
@@ -298,9 +365,8 @@ def health():
 def index():
     return jsonify({"status": "ok"})
 
+
 # ========== WEBHOOK SET ==========
-
-
 def set_webhook():
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
