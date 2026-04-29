@@ -192,7 +192,8 @@ def payment_notification():
     # Временные логи для отладки (можно удалить после проверки)
     logger.info(f"Received token: {received_token}")
     logger.info(f"Generated token: {generated_token}")
-    logger.info(f"Data for token: {{k: v for k, v in data.items() if not isinstance(v, (dict, list))} }")
+    parsed_data = {k: v for k, v in data.items() if not isinstance(v, (dict, list))}
+    logger.info(f"Data for token: {parsed_data}")
 
     if received_token != generated_token:
         logger.warning("❌ INVALID TOKEN")
