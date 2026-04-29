@@ -67,13 +67,16 @@ session.mount("http://", adapter)
 bot = telebot.TeleBot(TOKEN, threaded=False)
 telebot.apihelper.session = session
 
-# ========== ДОБАВЛЕНО: ХРАНЕНИЕ ЗАКАЗОВ ==========
+# ========== ХРАНЕНИЕ ЗАКАЗОВ ==========
+# Внимание: словарь живёт только в памяти. При рестарте сервера данные теряются.
+# Для продакшена лучше заменить на БД или файловое хранилище.
 orders = {}
 
 # ========== HELPERS ==========
 
 
 def safe_send_message(chat_id, text, **kwargs):
+    """Безопасная отправка сообщения с игнорированием ошибок."""
     try:
         return bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
@@ -81,19 +84,33 @@ def safe_send_message(chat_id, text, **kwargs):
         return None
 
 
-def generate_token(data: dict, password: str):
-    data_for_token = {}
-    for k, v in data.items():
-        if isinstance(v, (dict, list)):
+def generate_token(data: dict, password: str) -> str:
+    """
+    Генерация токена (подписи) по документации Т-Банка:
+    https://developer.tbank.ru/eacq/intro/developer/token
+
+    - Берем все ключи первого уровня
+    - Игнорируем вложенные словари и списки
+    - Добавляем Password
+    - Сортируем ключи по алфавиту
+    - Конкатенируем значения в одну строку
+    - Возвращаем SHA-256
+    """
+    pairs = {}
+    for key, value in data.items():
+        if isinstance(value, (dict, list)):
             continue
-        data_for_token[k] = v
-    data_for_token["Password"] = password
-    sorted_items = sorted(data_for_token.items())
-    concat = "".join(str(v) for k, v in sorted_items)
-    return hashlib.sha256(concat.encode()).hexdigest()
+        pairs[key] = str(value)
+
+    pairs["Password"] = password
+
+    sorted_keys = sorted(pairs.keys())
+    concat = "".join(pairs[k] for k in sorted_keys)
+
+    return hashlib.sha256(concat.encode("utf-8")).hexdigest()
+
 
 # ========== PAYMENT ==========
-
 
 @app.route('/init-payment', methods=['POST'])
 def init_payment():
@@ -103,13 +120,9 @@ def init_payment():
     customer_phone = body.get("phone") or "79999999999"
     success_url = body.get("success_url")
     fail_url = body.get("fail_url")
-
-    # ДОБАВЛЕНО: данные заказа
     order_data = body.get("order_data")
 
-    # Генерируем случайный номер заказа (число от 1 до 15000)
     order_id = str(random.randint(1, 15000))
-
     AMOUNT = 1000  # копейки
 
     payload = {
@@ -117,10 +130,7 @@ def init_payment():
         "Amount": AMOUNT,
         "OrderId": order_id,
         "Description": "Football Dream Team",
-
-        # ДОБАВЛЕНО: webhook
         "NotificationURL": f"{BACKEND_URL}/payment-notification",
-
         "Receipt": {
             "Phone": customer_phone,
             "Taxation": "usn_income",
@@ -147,7 +157,7 @@ def init_payment():
         resp = session.post(TINKOFF_INIT_URL, json=payload, timeout=5)
         data = resp.json()
 
-        # ДОБАВЛЕНО: сохраняем заказ
+        # Сохраняем заказ
         orders[order_id] = {
             "status": "pending",
             "data": order_data
@@ -162,33 +172,46 @@ def init_payment():
         return jsonify({"error": str(e)}), 500
 
 
-# ========== ДОБАВЛЕНО: WEBHOOK ОПЛАТЫ ==========
+# ========== WEBHOOK ОПЛАТЫ ==========
 @app.route('/payment-notification', methods=['POST'])
 def payment_notification():
     data = request.json
     logger.info(f"💰 PAYMENT NOTIFICATION: {data}")
 
-    received_token = data.get("Token")
+    if not data:
+        return "OK", 200
 
-    check_data = data.copy()
-    check_data.pop("Token", None)
-    generated_token = generate_token(check_data, PASSWORD)
+    received_token = data.get("Token")
+    if not received_token:
+        logger.warning("❌ No Token in notification")
+        return "OK", 200
+
+    # Генерируем токен из тех же данных (исключая сам Token)
+    generated_token = generate_token(data, PASSWORD)
+
+    # Временные логи для отладки (можно удалить после проверки)
+    logger.info(f"Received token: {received_token}")
+    logger.info(f"Generated token: {generated_token}")
+    logger.info(f"Data for token: {{k: v for k, v in data.items() if not isinstance(v, (dict, list))} }")
 
     if received_token != generated_token:
         logger.warning("❌ INVALID TOKEN")
-        return jsonify({"status": "invalid token"}), 400
+        return "OK", 200  # Отвечаем OK, чтобы Т-Банк не слал повторы
 
     status = data.get("Status")
     order_id = data.get("OrderId")
 
+    logger.info(f"Current orders keys: {list(orders.keys())}")
     if not order_id or order_id not in orders:
-        return jsonify({"status": "order not found"}), 200
+        logger.warning(f"❌ Order {order_id} not found")
+        return "OK", 200
 
     if status == "CONFIRMED":
         order = orders[order_id]["data"]
 
         if not order:
-            return jsonify({"status": "no order data"}), 200
+            logger.warning("Order data is empty")
+            return "OK", 200
 
         customer = order.get("customer", {})
         players = order.get("players", [])
@@ -217,7 +240,7 @@ def payment_notification():
 
         chat_id = customer.get("telegram_id")
 
-        # пользователю
+        # Отправка пользователю
         if chat_id:
             safe_send_message(
                 chat_id,
@@ -225,7 +248,7 @@ def payment_notification():
                 parse_mode="HTML"
             )
 
-        # админу
+        # Отправка админу
         if ADMIN_CHAT_ID:
             safe_send_message(
                 ADMIN_CHAT_ID,
@@ -233,7 +256,7 @@ def payment_notification():
                 parse_mode="HTML"
             )
 
-    return jsonify({"status": "ok"})
+    return "OK", 200
 
 
 @app.route('/get-dadata-token', methods=['GET'])
@@ -249,8 +272,8 @@ def get_config():
         "terminalKey": TERMINAL_KEY
     })
 
-# ========== TELEGRAM PROCESSORS (без изменений) ==========
 
+# ========== TELEGRAM PROCESSORS ==========
 
 def process_webapp_data(message):
     try:
@@ -353,8 +376,8 @@ def process_unknown_message(message):
     except Exception as e:
         logger.error(f"❌ unknown message error: {e}")
 
-# ========== WEBHOOK ==========
 
+# ========== WEBHOOK ==========
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -378,8 +401,8 @@ def webhook():
 
     return jsonify({'ok': 'True'})
 
-# ========== HEALTH ==========
 
+# ========== HEALTH ==========
 
 @app.route('/health')
 def health():
@@ -390,8 +413,8 @@ def health():
 def index():
     return jsonify({"status": "ok"})
 
-# ========== WEBHOOK SET ==========
 
+# ========== WEBHOOK SET ==========
 
 def set_webhook():
     bot.remove_webhook()
