@@ -248,17 +248,25 @@
         #constructorScreen { padding-bottom: 120px; }
         #paymentContainer {
             width: 100%;
-            min-height: 500px;
             margin-top: 20px;
             background: white;
             border-radius: 12px;
-            overflow: hidden;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
         }
-        #paymentContainer iframe {
+        #quickPaymentButtons {
+            min-height: 60px;
+        }
+        #cardPaymentIframe {
+            min-height: 350px;
+        }
+        #cardPaymentIframe iframe {
             border: none;
             display: block;
             width: 100%;
-            min-height: 500px;
+            min-height: 350px;
             background: white;
         }
         .payment-loader {
@@ -367,7 +375,10 @@
         <div id="paymentScreen" class="screen">
             <button class="back-button" id="backToReviewFromPayment">← Назад к заказу</button>
             <h2>Оплата заказа</h2>
-            <div id="paymentContainer"></div>
+            <div id="paymentContainer">
+                <div id="quickPaymentButtons"></div>
+                <div id="cardPaymentIframe"></div>
+            </div>
         </div>
     </div>
 
@@ -382,7 +393,6 @@
             const paymentStatus = urlParams.get('Success');
 
             if (paymentStatus === 'true') {
-                // Платёж успешен – восстанавливаем заказ из хранилища
                 let savedOrder = sessionStorage.getItem('pendingOrder');
                 if (!savedOrder) savedOrder = localStorage.getItem('pendingOrder');
                 if (savedOrder) {
@@ -397,7 +407,7 @@
                         console.error('Send error:', e);
                     }
                 }
-                return; // Не продолжаем загрузку конструктора
+                return;
             }
 
             if (paymentStatus === 'false') {
@@ -405,7 +415,7 @@
             }
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
-            let backendConfig = null; // будет загружен из /config
+            let backendConfig = null;
             let playersData = [];
             const fieldPositions = new Map();
             let currentPositionElement = null;
@@ -463,30 +473,40 @@
                 orderButton.style.display = isTeamComplete() ? 'inline-block' : 'none';
             }
 
-            // ========== DADATA ==========
+            // ========== DADATA (надёжная инициализация) ==========
             async function initDaData() {
                 const input = document.getElementById('address');
                 if (!input || input.dataset.dadataInit === "1") return;
+
+                // Ждём, пока jQuery и suggestions станут доступны
+                const maxWait = 10000; // 10 секунд
+                const startTime = Date.now();
+                while ((!window.jQuery || !jQuery.fn.suggestions) && (Date.now() - startTime) < maxWait) {
+                    await new Promise(r => setTimeout(r, 100));
+                }
+                if (!window.jQuery || !jQuery.fn.suggestions) {
+                    console.warn('DaData suggestions plugin not available');
+                    return;
+                }
+
                 if (!backendConfig) {
                     try { backendConfig = await loadConfig(); } catch(e) {}
                 }
                 const token = backendConfig?.dadataToken || '';
-                try {
-                    if (token) {
-                        $(input).suggestions({
-                            token: token,
-                            type: "ADDRESS",
-                            count: 5,
-                            minChars: 3,
-                            triggerSelectOnSpace: false,
-                            onSelect: (s) => {
-                                customerData.address = s.value;
-                                document.getElementById('addressError').classList.remove('visible');
-                            }
-                        });
-                        input.dataset.dadataInit = "1";
-                    }
-                } catch(e) { console.warn('DaData init error', e); }
+                if (token) {
+                    $(input).suggestions({
+                        token: token,
+                        type: "ADDRESS",
+                        count: 5,
+                        minChars: 3,
+                        triggerSelectOnSpace: false,
+                        onSelect: (s) => {
+                            customerData.address = s.value;
+                            document.getElementById('addressError').classList.remove('visible');
+                        }
+                    });
+                    input.dataset.dadataInit = "1";
+                }
             }
 
             // ========== ВАЛИДАЦИЯ ==========
@@ -748,23 +768,24 @@
                 updateOrderButtonVisibility();
             }
 
-            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ ==========
-            let paymentIntegrationInitialized = false;
-            let terminalKey = null; // будет взят из конфига
+            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ (БЫСТРЫЕ КНОПКИ + КАРТА) ==========
+            let terminalKey = null;
 
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
                 paymentInProgress = true;
                 document.activeElement?.blur();
 
-                // Убедимся, что конфиг загружен
                 if (!backendConfig) {
                     try { await loadConfig(); } catch(e) {}
                 }
-                terminalKey = backendConfig?.terminalKey || '1775395377330DEMO'; // fallback
+                terminalKey = backendConfig?.terminalKey || '1775395377330DEMO';
 
                 showScreen('payment');
-                await new Promise(resolve => setTimeout(resolve, 50)); // дадим DOM обновиться
+                // Очищаем контейнеры
+                document.getElementById('quickPaymentButtons').innerHTML = '';
+                document.getElementById('cardPaymentIframe').innerHTML = '';
+                await new Promise(resolve => setTimeout(resolve, 50));
                 await startPayment();
                 paymentInProgress = false;
             });
@@ -773,15 +794,14 @@
                 if (window.PaymentIntegration && typeof PaymentIntegration.destroy === 'function') {
                     PaymentIntegration.destroy();
                 }
-                paymentIntegrationInitialized = false;
-                document.getElementById('paymentContainer').innerHTML = '';
+                document.getElementById('quickPaymentButtons').innerHTML = '';
+                document.getElementById('cardPaymentIframe').innerHTML = '';
                 showScreen('review');
             });
 
             async function startPayment() {
-                // Сначала очистим контейнер
-                const container = document.getElementById('paymentContainer');
-                container.innerHTML = '';
+                const quickContainer = document.getElementById('quickPaymentButtons');
+                const cardContainer = document.getElementById('cardPaymentIframe');
 
                 if (!window.PaymentIntegration) {
                     alert('Платёжный модуль не загружен. Попробуйте обновить страницу.');
@@ -789,7 +809,7 @@
                     return;
                 }
 
-                // Готовим заказ для сохранения
+                // Сохраняем заказ
                 const tgUser = getTelegramUser();
                 const pendingOrderObj = {
                     order_id: customerData.order_id,
@@ -816,17 +836,15 @@
                     });
                 });
 
-                // Сохраняем в оба хранилища
                 const orderString = JSON.stringify(pendingOrderObj);
                 sessionStorage.setItem('pendingOrder', orderString);
                 localStorage.setItem('pendingOrder', orderString);
 
-                // URL для возврата после внешней оплаты
                 const baseUrl = window.location.origin + window.location.pathname;
                 const successUrl = baseUrl + '?Success=true';
                 const failUrl = baseUrl + '?Success=false';
 
-                // Запрашиваем PaymentURL у бэкенда (передаём и success/fail URL)
+                // Получаем PaymentURL
                 let paymentUrl;
                 try {
                     const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
@@ -850,45 +868,56 @@
                     return;
                 }
 
-                // Конфигурация платёжного виджета (быстрые кнопки)
+                // Единый обработчик изменения статуса
+                const statusChanged = (status) => {
+                    console.log('Статус платежа:', status);
+                    if (status === 'SUCCESS') {
+                        window.sendOrderToBot();
+                        quickContainer.innerHTML = '';
+                        cardContainer.innerHTML = `
+                            <div style="text-align:center; padding:40px;">
+                                <h3>✅ Оплата прошла успешно!</h3>
+                                <p>Спасибо за заказ. Приложение закроется через несколько секунд...</p>
+                            </div>`;
+                        sessionStorage.removeItem('pendingOrder');
+                        localStorage.removeItem('pendingOrder');
+                    } else if (status === 'REJECTED' || status === 'CANCELED') {
+                        setTimeout(() => {
+                            alert('❌ Оплата не прошла. Попробуйте снова.');
+                            if (window.PaymentIntegration && typeof PaymentIntegration.destroy === 'function') {
+                                PaymentIntegration.destroy();
+                            }
+                            quickContainer.innerHTML = '';
+                            cardContainer.innerHTML = '';
+                            showScreen('review');
+                            sessionStorage.removeItem('pendingOrder');
+                            localStorage.removeItem('pendingOrder');
+                        }, 500);
+                    }
+                };
+
                 const initConfig = {
                     terminalKey: terminalKey,
                     product: 'eacq',
                     features: {
+                        // Быстрые кнопки (T-Pay, СБП, SberPay, Mir Pay)
                         payment: {
-                            container: container,
+                            container: quickContainer,
                             widgetTypes: ['tpay', 'sbp', 'sberpay', 'mirpay'],
-                            // Функция, возвращающая PaymentURL (для методов, требующих его)
-                            paymentStartCallback: async () => {
-                                return paymentUrl;
-                            },
+                            paymentStartCallback: async () => paymentUrl,
                             config: {
                                 status: {
-                                    changedCallback: (status) => {
-                                        console.log('Статус платежа:', status);
-                                        if (status === 'SUCCESS') {
-                                            // Успешная оплата (в том числе и после возврата)
-                                            window.sendOrderToBot();
-                                            container.innerHTML = `
-                                                <div style="text-align:center; padding:40px;">
-                                                    <h3>✅ Оплата прошла успешно!</h3>
-                                                    <p>Спасибо за заказ. Приложение закроется через несколько секунд...</p>
-                                                </div>`;
-                                            sessionStorage.removeItem('pendingOrder');
-                                            localStorage.removeItem('pendingOrder');
-                                        } else if (status === 'REJECTED' || status === 'CANCELED') {
-                                            setTimeout(() => {
-                                                alert('❌ Оплата не прошла. Попробуйте снова.');
-                                                if (window.PaymentIntegration && typeof PaymentIntegration.destroy === 'function') {
-                                                    PaymentIntegration.destroy();
-                                                }
-                                                showScreen('review');
-                                                // Очищаем сохранённый заказ при отказе
-                                                sessionStorage.removeItem('pendingOrder');
-                                                localStorage.removeItem('pendingOrder');
-                                            }, 500);
-                                        }
-                                    }
+                                    changedCallback: statusChanged
+                                }
+                            }
+                        },
+                        // Форма ввода карты
+                        iframe: {
+                            container: cardContainer,
+                            paymentStartCallback: async () => paymentUrl,
+                            config: {
+                                status: {
+                                    changedCallback: statusChanged
                                 }
                             }
                         }
@@ -897,7 +926,6 @@
 
                 try {
                     await PaymentIntegration.init(initConfig);
-                    paymentIntegrationInitialized = true;
                 } catch(err) {
                     console.error(err);
                     alert('Ошибка запуска оплаты: ' + (err.message || 'неизвестная ошибка'));
@@ -907,7 +935,7 @@
                 }
             }
 
-            // Запускаем загрузку данных после получения конфига
+            // Запуск
             (async function main() {
                 try { await loadConfig(); } catch(e) {}
                 await loadTeamData();
