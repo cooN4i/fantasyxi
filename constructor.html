@@ -20,99 +20,296 @@
     <style>
         * { box-sizing: border-box; }
         body {
-            margin: 0; padding: 0; height: 100%; overflow: hidden;
-            font-family: system-ui, sans-serif; background: #f0f2f5;
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: system-ui, sans-serif;
+            background: #f0f2f5;
         }
         .back-button {
-            display: inline-block; margin-bottom: 16px; padding: 8px 16px;
-            background: #ddd; border-radius: 20px; text-decoration: none;
-            color: black; font-weight: 500; cursor: pointer;
+            display: inline-block;
+            margin-bottom: 16px;
+            padding: 8px 16px;
+            background: #ddd;
+            border-radius: 20px;
+            text-decoration: none;
+            color: black;
+            font-weight: 500;
+            cursor: pointer;
         }
         h2 { margin-top: 0; }
         .field {
-            width: 100%; max-width: 500px; margin: 0 auto 20px;
-            border-radius: 24px; padding: 12px; background: #2e7d32;
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto 20px;
+            border-radius: 24px;
+            padding: 12px;
+            background: #2e7d32;
         }
-        .positions-grid { width: 100%; display: flex; flex-direction: column; gap: 10px; }
-        .line { display: flex; justify-content: center; gap: clamp(4px, 2vw, 12px); flex-wrap: nowrap; }
-        .position-wrapper { display: flex; flex-direction: column; align-items: center; width: clamp(60px, 16vw, 90px); }
+        .positions-grid {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .line {
+            display: flex;
+            justify-content: center;
+            gap: clamp(4px, 2vw, 12px);
+            flex-wrap: nowrap;
+        }
+        .position-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: clamp(60px, 16vw, 90px);
+        }
         .position {
-            min-height: 90px; width: 100%; aspect-ratio: 2 / 3;
-            background: rgba(255,255,255,0.2); border: 2px solid rgba(255,255,255,0.6);
-            border-radius: 8px; position: relative; cursor: pointer;
+            min-height: 90px;
+            width: 100%;
+            aspect-ratio: 2 / 3;
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.6);
+            border-radius: 8px;
+            position: relative;
+            cursor: pointer;
         }
         .position.filled { border-color: white; }
         .position img {
-            width: 100%; height: 100%; object-fit: cover; position: absolute;
-            top: 0; left: 0; z-index: 1; pointer-events: none;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            pointer-events: none;
         }
         .position .player-name {
-            position: absolute; bottom: 4px; left: 0; right: 0;
-            background: rgba(255,255,255,0.7); padding: 3px; border-radius: 4px;
-            font-weight: bold; font-size: 10px; text-align: center; z-index: 2;
+            position: absolute;
+            bottom: 4px;
+            left: 0;
+            right: 0;
+            background: rgba(255,255,255,0.7);
+            padding: 3px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 10px;
+            text-align: center;
+            z-index: 2;
         }
-        .position-label { margin-top: 4px; font-size: 12px; font-weight: bold; color: #333; text-align: center; }
+        .position-label {
+            margin-top: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #333;
+            text-align: center;
+        }
         .selector-panel {
-            display: none; position: fixed; bottom: 0; left: 0; right: 0;
-            background: white; border-top-left-radius: 20px; border-top-right-radius: 20px;
-            box-shadow: 0 -4px 12px rgba(0,0,0,0.2); padding: 16px; max-height: 60vh;
-            overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; z-index: 1000;
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-top-left-radius: 20px;
+            border-top-right-radius: 20px;
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.2);
+            padding: 16px;
+            max-height: 60vh;
+        }
+        .selector-panel {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
+            position: fixed;
+            z-index: 1000;
         }
         .selector-panel.active { display: block; }
-        .selector-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-        .close-button { background: none; border: none; font-size: 24px; cursor: pointer; }
-        .players-list { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+        .selector-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .close-button {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        .players-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+        }
         .player-option {
-            width: 70px; height: 100px; border-radius: 8px; border: 1px solid #ccc;
-            cursor: pointer; position: relative; overflow: hidden; background-color: #f0f0f0;
+            width: 70px;
+            height: 100px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            background-color: #f0f0f0;
         }
-        .player-option img { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
+        .player-option img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
         .player-option .player-name {
-            position: absolute; bottom: 4px; left: 0; right: 0;
-            background: rgba(255,255,255,0.7); padding: 3px; font-weight: bold; font-size: 10px; text-align: center;
+            position: absolute;
+            bottom: 4px;
+            left: 0;
+            right: 0;
+            background: rgba(255,255,255,0.7);
+            padding: 3px;
+            font-weight: bold;
+            font-size: 10px;
+            text-align: center;
         }
-        .separator { width: 100%; text-align: center; font-weight: bold; color: #666; margin: 8px 0; }
+        .separator {
+            width: 100%;
+            text-align: center;
+            font-weight: bold;
+            color: #666;
+            margin: 8px 0;
+        }
         .form-container {
-            background: white; border-radius: 20px; padding: 20px; max-width: 400px;
-            margin: 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            background: white;
+            border-radius: 20px;
+            padding: 20px;
+            max-width: 400px;
+            margin: 0 auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
         .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; margin-bottom: 4px; font-weight: bold; }
+        .form-group label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: bold;
+        }
         .form-group input {
-            width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px;
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 16px;
         }
         .iti { width: 100%; }
-        .form-note { font-size: 12px; color: #666; margin-top: 4px; font-style: italic; }
-        .error-message { color: #dc3545; font-size: 14px; margin-top: 4px; display: none; }
+        .form-note {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+            font-style: italic;
+        }
+        .error-message {
+            color: #dc3545;
+            font-size: 14px;
+            margin-top: 4px;
+            display: none;
+        }
         .error-message.visible { display: block; }
-        .button-group { display: flex; justify-content: center; gap: 10px; margin: 20px auto 0; flex-wrap: wrap; }
+        .button-group {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px auto 0;
+            flex-wrap: wrap;
+        }
         .action-button {
-            padding: 10px 24px; border: none; border-radius: 30px; font-size: 1rem;
-            font-weight: bold; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            padding: 10px 24px;
+            border: none;
+            border-radius: 30px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
         }
         .clear-button { background: #dc3545; color: white; }
         .order-button { background: #28a745; color: white; }
         .secondary-button { background: #6c757d; color: white; }
         .screen {
-            display: none; width: 100%; height: 100%;
-            overflow-y: auto; -webkit-overflow-scrolling: touch;
-            padding: 16px; background: #f0f2f5;
+            display: none;
+            width: 100%;
+            height: 100%;
+
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+
+            padding: 16px;
+            background: #f0f2f5;
         }
-        .screen.active { display: block; }
+
+        .screen.active {
+            display: block;
+        }
         #constructorScreen { padding-bottom: 120px; }
         #paymentContainer {
-            width: 100%; min-height: 500px; margin-top: 20px;
-            background: white; border-radius: 12px; overflow: hidden;
+            width: 100%;
+            min-height: 500px;
+            margin-top: 20px;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
         }
-        #paymentContainer iframe { border: none; display: block; width: 100%; min-height: 500px; background: white; }
-        .payment-loader { text-align: center; padding: 40px; font-size: 18px; color: #666; }
-        body, html { height: 100%; overflow: hidden; position: fixed; width: 100%; }
-        #app { height: 100vh; overflow: hidden; display: flex; }
-        input, textarea { caret-color: #000000; color: #000000; }
-        input:focus, textarea:focus { caret-color: #007bff !important; -webkit-text-fill-color: #000000; }
-        .form-group input { caret-color: #007bff; }
-        .iti input, .iti input:focus { caret-color: #007bff !important; }
-        #address, #address:focus { caret-color: #007bff !important; }
+        #paymentContainer iframe {
+            border: none;
+            display: block;
+            width: 100%;
+            min-height: 500px;
+            background: white;
+        }
+        .payment-loader {
+            text-align: center;
+            padding: 40px;
+            font-size: 18px;
+            color: #666;
+        }
+        body, html {
+            height: 100%;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+        }
+        #app {
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+        }
+
+        /* Цвет курсора ввода для всех полей */
+        input, textarea {
+            caret-color: #000000;
+            color: #000000;
+        }
+
+        /* Для iOS Safari */
+        input:focus, textarea:focus {
+            caret-color: #007bff !important;
+            -webkit-text-fill-color: #000000;
+        }
+
+        /* Поля формы */
+        .form-group input {
+            caret-color: #007bff;
+        }
+
+        /* Телефонный инпут */
+        .iti input, .iti input:focus {
+            caret-color: #007bff !important;
+        }
+
+        /* Поле адреса DaData */
+        #address, #address:focus {
+            caret-color: #007bff !important;
+        }
     </style>
 </head>
 <body>
@@ -189,7 +386,7 @@
         </div>
     </div>
 
-    <script src="https://integrationjs.tbank.ru/integration.js"></script>
+    <script src="https://integrationjs.t-static.ru/integration.js"></script>
 
     <script>
         (function() {
@@ -200,6 +397,7 @@
             const paymentStatus = urlParams.get('Success');
             
             if (paymentStatus === 'true') {
+                // Платёж успешен — отправляем заказ
                 const savedOrder = sessionStorage.getItem('pendingOrder');
                 if (savedOrder) {
                     try {
@@ -210,23 +408,23 @@
                         console.error('Send error:', e);
                     }
                 }
-                return;
+                return; // Не продолжаем загрузку конструктора
             }
             
             if (paymentStatus === 'false') {
                 alert('❌ Оплата не прошла. Попробуйте снова.');
             }
+            // ========== КОНЕЦ ПРОВЕРКИ ==========
 
-            // === КОНФИГУРАЦИЯ ===
+            // === КОНФИГУРАЦИЯ (динамическая) ===
             let BACKEND_URL = 'https://fantasyxi.abrdns.com';
-            let TERMINAL_KEY = '';
             
+            // Загружаем конфигурацию с бэкенда
             async function loadConfig() {
                 try {
                     const res = await fetch(`${BACKEND_URL}/config`);
                     const config = await res.json();
                     if (config.backendUrl) BACKEND_URL = config.backendUrl;
-                    if (config.terminalKey) TERMINAL_KEY = config.terminalKey;
                     return config;
                 } catch(e) {
                     console.warn('Не удалось загрузить конфиг, используем fallback', e);
@@ -259,10 +457,6 @@
             const selectorTitle = document.getElementById('selectorTitle');
             const closeSelector = document.getElementById('closeSelector');
             const orderButton = document.getElementById('orderButton');
-
-            // Исправление для DaData на телефоне
-            let daDataState = 'idle';
-
             function showScreen(screenName) {
                 constructorScreen.classList.remove('active');
                 formScreen.classList.remove('active');
@@ -293,15 +487,21 @@
 
             function isTeamComplete() { return fieldPositions.size === 11; }
             function updateOrderButtonVisibility() { orderButton.style.display = isTeamComplete() ? 'inline-block' : 'none'; }
-            
+            let daDataReady = false;
             async function initDaData() {
                 const input = document.getElementById('address');
                 if (!input) return;
+
                 if (input.dataset.dadataInit === "1") return;
+
                 try {
-                    const res = await fetch(`${BACKEND_URL}/get-dadata-token`, { cache: "no-store" });
+                    const res = await fetch(`${BACKEND_URL}/get-dadata-token`, {
+                        cache: "no-store"
+                    });
+
                     const data = await res.json();
                     if (!data?.token) throw new Error('No token');
+
                     $(input).suggestions({
                         token: data.token,
                         type: "ADDRESS",
@@ -313,8 +513,12 @@
                             document.getElementById('addressError').classList.remove('visible');
                         }
                     });
+
                     input.dataset.dadataInit = "1";
-                } catch (e) { console.warn('DaData init error', e); }
+
+                } catch (e) {
+                    console.warn('DaData init error', e);
+                }
             }
 
             function validatePhone() {
@@ -350,15 +554,21 @@
             }
 
             window.sendOrderToBot = function() {
-                if (!window.Telegram || !Telegram.WebApp) { alert("❌ Telegram WebApp недоступен"); return; }
+                if (!window.Telegram || !Telegram.WebApp) {
+                    alert("❌ Telegram WebApp недоступен");
+                    return;
+                }
                 const tgUser = getTelegramUser();
                 const composition = {
                     order_id: customerData.order_id,
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
                     customer: {
-                        surname: customerData.surname, name: customerData.name, patronymic: customerData.patronymic,
-                        phone: customerData.phone, address: customerData.address,
+                        surname: customerData.surname,
+                        name: customerData.name,
+                        patronymic: customerData.patronymic,
+                        phone: customerData.phone,
+                        address: customerData.address,
                         telegram: tgUser?.username ? '@' + tgUser.username : null,
                         telegram_id: tgUser?.id || null
                     },
@@ -481,8 +691,7 @@
                 } catch(e) { document.body.innerHTML += `<div style="color:red;text-align:center;">Ошибка: ${e.message}</div>`; }
             }
 
-            async function initApp() {
-                await loadConfig();
+            function initApp() {
                 positions.forEach(p => p.addEventListener('click', () => openSelector(p)));
                 closeSelector.addEventListener('click', closePanel);
                 document.getElementById('clearButton').addEventListener('click', clearField);
@@ -507,19 +716,26 @@
 
             loadTeamData();
 
-            // ========== НОВЫЙ БЛОК ОПЛАТЫ ==========
+            // ---------- ОПЛАТА ----------
             let paymentIntegrationInitialized = false;
-            let mainPaymentIntegration = null;
             let paymentContainer = document.getElementById('paymentContainer');
 
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
+                
                 document.activeElement?.blur();
                 customerData.order_id = Math.floor(Math.random() * 9900) + 100;
                 paymentInProgress = true;
                 showScreen('payment');
+
+                // ⚡ ВАЖНО: Сбрасываем интеграцию перед каждым открытием
                 resetPaymentIntegration();
-                try { await startPayment(); } finally { paymentInProgress = false; }
+                
+                try {
+                    await startPayment();
+                } finally {
+                    paymentInProgress = false;
+                }
             });
 
             document.getElementById('backToReviewFromPayment').addEventListener('click', () => {
@@ -529,34 +745,80 @@
 
             function resetPaymentIntegration() {
                 try {
-                    if (mainPaymentIntegration?.unmount) mainPaymentIntegration.unmount();
-                    if (window.PaymentIntegration?.destroy) window.PaymentIntegration.destroy();
-                } catch (e) { console.warn('destroy error', e); }
-                while (paymentContainer.firstChild) paymentContainer.removeChild(paymentContainer.firstChild);
+                    if (window.PaymentIntegration?.destroy) {
+                        window.PaymentIntegration.destroy();
+                    }
+                } catch (e) {
+                    console.warn('destroy error', e);
+                }
+                
+                // Агрессивная очистка: удаляем ВСЕХ потомков
+                while (paymentContainer.firstChild) {
+                    paymentContainer.removeChild(paymentContainer.firstChild);
+                }
+                
+                // Принудительно очищаем innerHTML
                 paymentContainer.innerHTML = '';
-                mainPaymentIntegration = null;
+                
                 paymentIntegrationInitialized = false;
+            }
+
+            function recreatePaymentContainer() {
+                const old = document.getElementById('paymentContainer');
+                
+                // Создаём полностью новый элемент
+                const fresh = document.createElement('div');
+                fresh.id = 'paymentContainer';
+                fresh.style.width = '100%';
+                fresh.style.minHeight = '500px';
+                fresh.style.marginTop = '20px';
+                fresh.style.background = 'white';
+                fresh.style.borderRadius = '12px';
+                fresh.style.overflow = 'hidden';
+                
+                // Заменяем старый на новый
+                old.parentNode.replaceChild(fresh, old);
+                
+                // Обновляем глобальную ссылку
+                paymentContainer = fresh;
+                
+                return fresh;
             }
 
             async function startPayment() {
                 resetPaymentIntegration();
+                
+                // Небольшая задержка для полной очистки
                 await new Promise(resolve => setTimeout(resolve, 400));
-
+                
+                paymentContainer = recreatePaymentContainer();
+                
                 if (!window.PaymentIntegration) {
                     alert('Платёжный модуль ещё не загружен, попробуйте через секунду');
                     showScreen('review');
                     return;
                 }
+                
+                if (paymentIntegrationInitialized) {
+                    await PaymentIntegration.destroy?.();
+                    paymentIntegrationInitialized = false;
+                }
+                
+                const orderId = customerData.order_id;
+                const amount = 100;
 
-                // Сохраняем заказ для возврата после T-Pay/SBP/Mir Pay
+                // Сохраняем заказ для возврата после T-Pay
                 const tgUser = getTelegramUser();
                 const pendingOrderObj = {
                     order_id: customerData.order_id,
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
                     customer: {
-                        surname: customerData.surname, name: customerData.name, patronymic: customerData.patronymic,
-                        phone: customerData.phone, address: customerData.address,
+                        surname: customerData.surname,
+                        name: customerData.name,
+                        patronymic: customerData.patronymic,
+                        phone: customerData.phone,
+                        address: customerData.address,
                         telegram: tgUser?.username ? '@' + tgUser.username : null,
                         telegram_id: tgUser?.id || null
                     },
@@ -571,49 +833,50 @@
                 sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrderObj));
 
                 const initConfig = {
-                    terminalKey: TERMINAL_KEY,
+                    terminalKey: '1775395377330DEMO',
                     product: 'eacq',
                     features: {
-                        payment: {
-                            on: {
-                                paymentStatusChanged: (event) => {
-                                    console.log('Статус платежа:', event.status);
-                                    if (event.status === 'SUCCESS') {
-                                        window.sendOrderToBot();
-                                        paymentContainer.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
-                                    } else if (event.status === 'REJECTED' || event.status === 'CANCELED') {
-                                        setTimeout(() => {
-                                            alert('❌ Оплата не прошла. Попробуйте снова.');
-                                            resetPaymentIntegration();
-                                            showScreen('review');
-                                        }, 500);
+                        iframe: {
+                            container: paymentContainer,
+                            paymentStartCallback: async () => {
+                                const resp = await fetch(`${BACKEND_URL}/init-payment`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        order_id: orderId,
+                                        amount: amount,
+                                        phone: customerData.phone
+                                    })
+                                });
+                                const data = await resp.json();
+                                if (!data.PaymentURL) throw new Error('Не удалось получить PaymentURL');
+                                return data.PaymentURL;
+                            },
+                            config: {
+                                status: {
+                                    changedCallback: async (status) => {
+                                        console.log('Статус платежа:', status);
+                                        if (status === 'SUCCESS') {
+                                            window.sendOrderToBot();
+                                            paymentContainer.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
+                                        } else if (status === 'REJECTED' || status === 'CANCELED') {
+                                            // Небольшая задержка перед возвратом
+                                            setTimeout(() => {
+                                                alert('❌ Оплата не прошла. Попробуйте снова.');
+                                                resetPaymentIntegration();
+                                                showScreen('review');
+                                            }, 500);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 };
-
+                
                 try {
-                    const integration = await PaymentIntegration.init(initConfig);
+                    await PaymentIntegration.init(initConfig);
                     paymentIntegrationInitialized = true;
-
-                    mainPaymentIntegration = await integration.payments.create('fantasy-payment', {});
-
-                    await mainPaymentIntegration.mount(paymentContainer);
-
-                    await integration.payments.setPaymentStartCallback(async () => {
-                        const helpers = new PaymentIntegration.Helpers();
-                        const resp = await helpers.request(`${BACKEND_URL}/init-payment`, 'POST', {
-                            order_id: customerData.order_id,
-                            phone: customerData.phone
-                        });
-                        return resp.PaymentURL || resp.paymentUrl;
-                    });
-
-                    const widgetTypes = ['card', 'mirpay', 'sbp', 'tpay'];
-                    await mainPaymentIntegration.updateWidgetTypes(widgetTypes);
-
                 } catch (err) {
                     console.error(err);
                     alert('Ошибка запуска оплаты: ' + (err.message || 'неизвестная ошибка'));
