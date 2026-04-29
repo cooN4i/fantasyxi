@@ -8,7 +8,7 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <!-- jQuery (необходим для DaData) -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <!-- intl-tel-input для валидации телефона -->
+    <!-- intl-tel-input -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/css/intlTelInput.css">
     <script src="https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/js/intlTelInput.min.js"></script>
     <!-- DaData Suggestions -->
@@ -251,12 +251,6 @@
             background: white;
             border-radius: 20px;
             padding: 24px 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        #quickPayments {
-            /* блок быстрых кнопок */
         }
         #cardWidget {
             min-height: 350px;
@@ -364,7 +358,6 @@
             <button class="back-button" id="backToReviewFromPayment">← Назад к заказу</button>
             <h2>Оплата заказа</h2>
             <div id="paymentContainer">
-                <div id="quickPayments"></div>
                 <div id="cardWidget"></div>
             </div>
         </div>
@@ -753,7 +746,7 @@
                 updateOrderButtonVisibility();
             }
 
-            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ ==========
+            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ (ТОЛЬКО IFRAME) ==========
             let terminalKey = null;
             let currentPaymentId = null;
 
@@ -767,11 +760,10 @@
                 }
                 terminalKey = backendConfig?.terminalKey || '1775395377330DEMO';
 
-                // Уничтожаем предыдущую интеграцию и очищаем контейнеры
+                // Уничтожаем предыдущую интеграцию
                 if (window.PaymentIntegration) {
                     try { PaymentIntegration.destroy(); } catch(e) {}
                 }
-                document.getElementById('quickPayments').innerHTML = '';
                 document.getElementById('cardWidget').innerHTML = '';
                 currentPaymentId = null;
 
@@ -785,7 +777,6 @@
                 if (window.PaymentIntegration) {
                     try { PaymentIntegration.destroy(); } catch(e) {}
                 }
-                document.getElementById('quickPayments').innerHTML = '';
                 document.getElementById('cardWidget').innerHTML = '';
                 currentPaymentId = null;
                 showScreen('review');
@@ -798,7 +789,6 @@
                     return;
                 }
 
-                // Получаем order_id и PaymentURL с бэкенда
                 let paymentUrl, orderId;
                 try {
                     const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
@@ -822,7 +812,6 @@
                     return;
                 }
 
-                // Сохраняем заказ
                 const tgUser = getTelegramUser();
                 const pendingOrderObj = {
                     order_id: orderId,
@@ -854,7 +843,6 @@
 
                 currentPaymentId = orderId;
 
-                // Обработчик статуса
                 const statusChanged = (status) => {
                     if (currentPaymentId !== orderId) return;
                     if (status === 'SUCCESS') {
@@ -869,7 +857,6 @@
                             if (window.PaymentIntegration) {
                                 try { PaymentIntegration.destroy(); } catch(e) {}
                             }
-                            document.getElementById('quickPayments').innerHTML = '';
                             document.getElementById('cardWidget').innerHTML = '';
                             showScreen('review');
                             sessionStorage.removeItem('pendingOrder');
@@ -878,30 +865,17 @@
                     }
                 };
 
-                // Единая конфигурация
+                // ТОЛЬКО IFRAME (все быстрые кнопки внутри)
                 const initConfig = {
                     terminalKey: terminalKey,
                     product: 'eacq',
                     features: {
-                        payment: {
-                            container: document.getElementById('quickPayments'),
-                            widgetTypes: ['sbp', 'sberpay'],
-                            paymentStartCallback: async () => paymentUrl,
-                            config: {
-                                status: {
-                                    changedCallback: statusChanged
-                                }
-                            }
-                        },
                         iframe: {
                             container: document.getElementById('cardWidget'),
                             paymentStartCallback: async () => paymentUrl,
                             config: {
                                 status: {
                                     changedCallback: statusChanged
-                                },
-                                features: {
-                                    payment: false
                                 }
                             }
                         }
