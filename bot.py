@@ -115,7 +115,8 @@ def init_payment():
     success_url = body.get("success_url")
     fail_url = body.get("fail_url")
     order_data = body.get("order_data")
-
+    logger.info(f"Order data received: {order_data}")
+    logger.info(f"Customer ID: {order_data.get('customer', {}).get('telegram_id')}")
     order_id = str(random.randint(1, 15000))
     AMOUNT = 1000  # копейки
 

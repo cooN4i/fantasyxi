@@ -243,7 +243,6 @@
         .screen.active { display: block; }
         #constructorScreen { padding-bottom: 120px; }
 
-        /* Платёжный контейнер */
         #paymentContainer {
             width: 100%;
             max-width: 400px;
@@ -366,10 +365,27 @@
     <script>
         (function() {
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
-            let orderAlreadySent = false;
 
-            // Больше не обрабатываем успех по URL – оплата будет подтверждена через бота
-            // (вебхук /payment-notification)
+            // ========== ГАРАНТИРУЕМ ID ПОЛЬЗОВАТЕЛЯ ==========
+            let storedTelegramId = null;
+            let storedTelegramUsername = null;
+
+            try {
+                const unsafe = Telegram.WebApp?.initDataUnsafe;
+                if (unsafe?.user) {
+                    storedTelegramId = unsafe.user.id;
+                    storedTelegramUsername = unsafe.user.username || null;
+                }
+            } catch (e) {}
+
+            if (storedTelegramId) {
+                sessionStorage.setItem('tg_id', storedTelegramId);
+                if (storedTelegramUsername) sessionStorage.setItem('tg_username', storedTelegramUsername);
+            } else {
+                // Пробуем восстановить из sessionStorage
+                storedTelegramId = sessionStorage.getItem('tg_id') || null;
+                storedTelegramUsername = sessionStorage.getItem('tg_username') || null;
+            }
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
             let backendConfig = null;
@@ -491,17 +507,21 @@
             }
 
             function getTelegramUser() {
+                // Используем сохранённые значения в первую очередь
+                if (storedTelegramId) {
+                    return {
+                        id: storedTelegramId,
+                        username: storedTelegramUsername
+                    };
+                }
+                // fallback на прямые данные (на случай, если появятся)
                 if (!window.Telegram || !Telegram.WebApp) return null;
                 const unsafe = Telegram.WebApp.initDataUnsafe;
                 return unsafe?.user || null;
             }
 
-            // Эта функция больше не вызывается из платёжного потока,
-            // но оставлена на случай отправки данных напрямую (не используется)
+            // Эта функция больше не вызывается из платёжного потока
             window.sendOrderToBot = function() {
-                if (orderAlreadySent) return;
-
-                orderAlreadySent = true;
                 if (!window.Telegram || !Telegram.WebApp) {
                     alert("❌ Telegram WebApp недоступен");
                     return;
@@ -728,12 +748,27 @@
                 updateOrderButtonVisibility();
             }
 
-            // ========== НОВАЯ ПЛАТЁЖНАЯ ЛОГИКА ==========
+            // ========== НОВАЯ ПЛАТЁЖНАЯ ЛОГИКА (БЕЗ ЗАДЕРЖКИ) ==========
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
                 paymentInProgress = true;
 
                 const tgUser = getTelegramUser();
+                if (!tgUser || !tgUser.id) {
+                    showScreen('payment');
+                    document.getElementById('paymentContainer').innerHTML = `
+                        <div style="text-align:center; padding:30px;">
+                            <h3>⚠️ Не удалось идентифицировать пользователя Telegram</h3>
+                            <p>Пожалуйста, откройте конструктор снова через бота @FantasyXIBot</p>
+                            <button class="action-button secondary-button" id="backFromError">← Назад к заказу</button>
+                        </div>`;
+                    document.getElementById('backFromError').addEventListener('click', () => {
+                        showScreen('review');
+                    });
+                    paymentInProgress = false;
+                    return;
+                }
+
                 const pendingOrderObj = {
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
@@ -743,8 +778,8 @@
                         patronymic: customerData.patronymic,
                         phone: customerData.phone,
                         address: customerData.address,
-                        telegram: tgUser?.username ? '@' + tgUser.username : null,
-                        telegram_id: tgUser?.id || null
+                        telegram: tgUser.username ? '@' + tgUser.username : null,
+                        telegram_id: tgUser.id
                     },
                     players: []
                 };
@@ -773,17 +808,15 @@
                     if (!data.PaymentURL || !data.order_id) throw new Error('Invalid response');
 
                     pendingOrderObj.order_id = data.order_id;
-                    // Сохраняем на случай, если потребуется восстановить заказ (не обязательно)
                     sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrderObj));
 
-                    // Открываем платёжную ссылку в системном браузере
+                    // Сразу открываем платёжную ссылку и показываем финальный экран
                     if (window.Telegram && Telegram.WebApp) {
                         Telegram.WebApp.openLink(data.PaymentURL, { try_instant_view: false });
                     } else {
                         window.open(data.PaymentURL, '_blank');
                     }
 
-                    // Показываем экран оплаты с пояснением и кнопкой «Вернуться в чат»
                     showScreen('payment');
                     document.getElementById('paymentContainer').innerHTML = `
                         <div style="text-align:center; padding:30px;">
@@ -792,7 +825,7 @@
                             <button class="action-button order-button" id="closeAfterPayment">Вернуться в чат</button>
                         </div>`;
                     document.getElementById('closeAfterPayment').addEventListener('click', () => {
-                        Telegram.WebApp.close();
+                        if (window.Telegram && Telegram.WebApp) Telegram.WebApp.close();
                     });
 
                 } catch(e) {
