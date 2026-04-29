@@ -42,8 +42,6 @@ logger = logging.getLogger("bot")
 app = Flask(__name__)
 CORS(app)
 
-# ========== GEVENT GREENLET (СОВМЕСТИМО С GUNICORN GEVENT) ==========
-
 # ========== REQUESTS SESSION (CONNECTION POOL + RETRY) ==========
 session = requests.Session()
 
@@ -86,17 +84,13 @@ def async_telegram_task(fn, *args, **kwargs):
 
 def generate_token(data: dict, password: str):
     data_for_token = {}
-
     for k, v in data.items():
         if isinstance(v, (dict, list)):
             continue
         data_for_token[k] = v
-
     data_for_token["Password"] = password
-
     sorted_items = sorted(data_for_token.items())
     concat = "".join(str(v) for k, v in sorted_items)
-
     return hashlib.sha256(concat.encode()).hexdigest()
 
 
@@ -108,6 +102,8 @@ def init_payment():
     body = request.json
     order_id = body.get("order_id")
     customer_phone = body.get("phone") or "79999999999"
+    success_url = body.get("success_url")   # для редиректа после оплаты
+    fail_url = body.get("fail_url")
 
     # Сумма ТОЛЬКО на бэкенде (в копейках)
     AMOUNT = 100  # 1 рубль для теста
@@ -131,6 +127,12 @@ def init_payment():
             ]
         }
     }
+
+    # Добавляем URL возврата, если переданы
+    if success_url:
+        payload["SuccessURL"] = success_url
+    if fail_url:
+        payload["FailURL"] = fail_url
 
     payload["Token"] = generate_token(payload, PASSWORD)
 

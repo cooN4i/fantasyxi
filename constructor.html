@@ -239,17 +239,12 @@
             display: none;
             width: 100%;
             height: 100%;
-
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
-
             padding: 16px;
             background: #f0f2f5;
         }
-
-        .screen.active {
-            display: block;
-        }
+        .screen.active { display: block; }
         #constructorScreen { padding-bottom: 120px; }
         #paymentContainer {
             width: 100%;
@@ -283,30 +278,20 @@
             overflow: hidden;
             display: flex;
         }
-
-        /* Цвет курсора ввода для всех полей */
         input, textarea {
             caret-color: #000000;
             color: #000000;
         }
-
-        /* Для iOS Safari */
         input:focus, textarea:focus {
             caret-color: #007bff !important;
             -webkit-text-fill-color: #000000;
         }
-
-        /* Поля формы */
         .form-group input {
             caret-color: #007bff;
         }
-
-        /* Телефонный инпут */
         .iti input, .iti input:focus {
             caret-color: #007bff !important;
         }
-
-        /* Поле адреса DaData */
         #address, #address:focus {
             caret-color: #007bff !important;
         }
@@ -392,16 +377,20 @@
         (function() {
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
 
-            // ========== ПРОВЕРКА ВОЗВРАТА ПОСЛЕ T-PAY ==========
+            // ========== ВОЗВРАТ ПОСЛЕ ОПЛАТЫ (внешние сервисы) ==========
             const urlParams = new URLSearchParams(window.location.search);
             const paymentStatus = urlParams.get('Success');
-            
+
             if (paymentStatus === 'true') {
-                // Платёж успешен — отправляем заказ
-                const savedOrder = sessionStorage.getItem('pendingOrder');
+                // Платёж успешен – восстанавливаем заказ из хранилища
+                let savedOrder = sessionStorage.getItem('pendingOrder');
+                if (!savedOrder) savedOrder = localStorage.getItem('pendingOrder');
                 if (savedOrder) {
                     try {
-                        Telegram.WebApp.sendData(savedOrder);
+                        const orderData = JSON.parse(savedOrder);
+                        Telegram.WebApp.sendData(JSON.stringify(orderData));
+                        sessionStorage.removeItem('pendingOrder');
+                        localStorage.removeItem('pendingOrder');
                         document.body.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
                         setTimeout(() => Telegram.WebApp.close(), 2000);
                     } catch(e) {
@@ -410,38 +399,21 @@
                 }
                 return; // Не продолжаем загрузку конструктора
             }
-            
+
             if (paymentStatus === 'false') {
                 alert('❌ Оплата не прошла. Попробуйте снова.');
             }
-            // ========== КОНЕЦ ПРОВЕРКИ ==========
 
-            // === КОНФИГУРАЦИЯ (динамическая) ===
-            let BACKEND_URL = 'https://fantasyxi.abrdns.com';
-            
-            // Загружаем конфигурацию с бэкенда
-            async function loadConfig() {
-                try {
-                    const res = await fetch(`${BACKEND_URL}/config`);
-                    const config = await res.json();
-                    if (config.backendUrl) BACKEND_URL = config.backendUrl;
-                    return config;
-                } catch(e) {
-                    console.warn('Не удалось загрузить конфиг, используем fallback', e);
-                    return null;
-                }
-            }
-
-            let team = urlParams.get('team') || 'Барселона';
-            document.getElementById('team-title').textContent = `Состав ${team}`;
-            const jsonFileName = team.toLowerCase() + '.json';
+            // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
+            let backendConfig = null; // будет загружен из /config
             let playersData = [];
             const fieldPositions = new Map();
             let currentPositionElement = null;
             let iti = null;
             let paymentInProgress = false;
             window.customerData = {
-                surname: '', name: '', patronymic: '', phone: '', address: '', order_id: null
+                surname: '', name: '', patronymic: '',
+                phone: '', address: '', order_id: null
             };
             const customerData = window.customerData;
 
@@ -457,6 +429,8 @@
             const selectorTitle = document.getElementById('selectorTitle');
             const closeSelector = document.getElementById('closeSelector');
             const orderButton = document.getElementById('orderButton');
+
+            // ========== ПОКАЗ ЭКРАНОВ ==========
             function showScreen(screenName) {
                 constructorScreen.classList.remove('active');
                 formScreen.classList.remove('active');
@@ -464,7 +438,6 @@
                 paymentScreen.classList.remove('active');
                 if (screenName === 'constructor') constructorScreen.classList.add('active');
                 else if (screenName === 'form') {
-                    daDataState = 'idle';
                     initDaData();
                     formScreen.classList.add('active');
                     document.getElementById('surname').value = customerData.surname;
@@ -486,41 +459,37 @@
             }
 
             function isTeamComplete() { return fieldPositions.size === 11; }
-            function updateOrderButtonVisibility() { orderButton.style.display = isTeamComplete() ? 'inline-block' : 'none'; }
-            let daDataReady = false;
-            async function initDaData() {
-                const input = document.getElementById('address');
-                if (!input) return;
-
-                if (input.dataset.dadataInit === "1") return;
-
-                try {
-                    const res = await fetch(`${BACKEND_URL}/get-dadata-token`, {
-                        cache: "no-store"
-                    });
-
-                    const data = await res.json();
-                    if (!data?.token) throw new Error('No token');
-
-                    $(input).suggestions({
-                        token: data.token,
-                        type: "ADDRESS",
-                        count: 5,
-                        minChars: 3,
-                        triggerSelectOnSpace: false,
-                        onSelect: (s) => {
-                            customerData.address = s.value;
-                            document.getElementById('addressError').classList.remove('visible');
-                        }
-                    });
-
-                    input.dataset.dadataInit = "1";
-
-                } catch (e) {
-                    console.warn('DaData init error', e);
-                }
+            function updateOrderButtonVisibility() {
+                orderButton.style.display = isTeamComplete() ? 'inline-block' : 'none';
             }
 
+            // ========== DADATA ==========
+            async function initDaData() {
+                const input = document.getElementById('address');
+                if (!input || input.dataset.dadataInit === "1") return;
+                if (!backendConfig) {
+                    try { backendConfig = await loadConfig(); } catch(e) {}
+                }
+                const token = backendConfig?.dadataToken || '';
+                try {
+                    if (token) {
+                        $(input).suggestions({
+                            token: token,
+                            type: "ADDRESS",
+                            count: 5,
+                            minChars: 3,
+                            triggerSelectOnSpace: false,
+                            onSelect: (s) => {
+                                customerData.address = s.value;
+                                document.getElementById('addressError').classList.remove('visible');
+                            }
+                        });
+                        input.dataset.dadataInit = "1";
+                    }
+                } catch(e) { console.warn('DaData init error', e); }
+            }
+
+            // ========== ВАЛИДАЦИЯ ==========
             function validatePhone() {
                 if (!iti) return false;
                 const valid = iti.isValidNumber();
@@ -545,7 +514,6 @@
                 document.getElementById('addressError').classList.toggle('visible', !ok);
                 return ok;
             }
-            function validatePatronymic() { return true; }
 
             function getTelegramUser() {
                 if (!window.Telegram || !Telegram.WebApp) return null;
@@ -578,19 +546,25 @@
                     const posDiv = wrapper.querySelector('.position');
                     const labelDiv = wrapper.querySelector('.position-label');
                     const playerName = fieldPositions.get(posDiv);
-                    if (playerName) composition.players.push({ position: labelDiv.textContent, name: playerName });
+                    if (playerName) composition.players.push({
+                        position: labelDiv.textContent,
+                        name: playerName
+                    });
                 });
-                const realData = JSON.stringify(composition);
-                console.log('Отправка заказа:', realData);
                 try {
-                    Telegram.WebApp.sendData(realData);
+                    Telegram.WebApp.sendData(JSON.stringify(composition));
                     setTimeout(() => Telegram.WebApp.close(), 2000);
                 } catch(e) { alert('Ошибка отправки: ' + e.message); }
             };
 
             function showReviewScreen() {
                 const reviewContent = document.getElementById('reviewContent');
-                let html = `<h3>Команда: ${team}</h3><h4>Клиент:</h4><p>${customerData.surname} ${customerData.name} ${customerData.patronymic}</p><p>${customerData.phone}</p><p>${customerData.address}</p><h4>Состав:</h4><ul>`;
+                let html = `<h3>Команда: ${team}</h3>
+                            <h4>Клиент:</h4>
+                            <p>${customerData.surname} ${customerData.name} ${customerData.patronymic}</p>
+                            <p>${customerData.phone}</p>
+                            <p>${customerData.address}</p>
+                            <h4>Состав:</h4><ul>`;
                 positionWrappers.forEach(wrapper => {
                     const posDiv = wrapper.querySelector('.position');
                     const labelDiv = wrapper.querySelector('.position-label');
@@ -602,7 +576,7 @@
                 showScreen('review');
             }
 
-            // ---------- Конструктор ----------
+            // ========== КОНСТРУКТОР ИГРОКОВ ==========
             function openSelector(positionElement) {
                 const positionType = positionElement.dataset.position;
                 const posNames = { GK: 'вратаря', DEF: 'защитника', MID: 'полузащитника', FWD: 'нападающего' };
@@ -613,6 +587,7 @@
                 selectorPanel.classList.add('active');
                 selectorPanel.scrollTop = 0;
             }
+
             function getAvailablePlayers(positionType) {
                 let rusPos = '';
                 if (positionType === 'GK') rusPos = 'ВРТ';
@@ -620,13 +595,16 @@
                 else if (positionType === 'MID') rusPos = 'ПЗЩ';
                 else if (positionType === 'FWD') rusPos = 'НАП';
                 const occupied = new Set();
-                for (let [pos, name] of fieldPositions.entries()) if (pos !== currentPositionElement) occupied.add(name);
+                for (let [pos, name] of fieldPositions.entries()) {
+                    if (pos !== currentPositionElement) occupied.add(name);
+                }
                 const free = playersData.filter(p => !occupied.has(p.name));
                 if (rusPos === 'ВРТ') return { same: free.filter(p => p.position === 'ВРТ'), other: [] };
                 const same = free.filter(p => p.position === rusPos);
                 const other = free.filter(p => p.position !== rusPos && p.position !== 'ВРТ');
                 return { same, other };
             }
+
             function renderPlayerList(available, positionType) {
                 playersList.innerHTML = '';
                 const addPlayer = (p) => playersList.appendChild(createPlayerOption(p));
@@ -634,22 +612,36 @@
                 else {
                     available.same.forEach(addPlayer);
                     if (available.same.length && available.other.length) {
-                        const sep = document.createElement('div'); sep.className = 'separator'; sep.textContent = 'Другие позиции'; playersList.appendChild(sep);
+                        const sep = document.createElement('div');
+                        sep.className = 'separator';
+                        sep.textContent = 'Другие позиции';
+                        playersList.appendChild(sep);
                     }
                     available.other.forEach(addPlayer);
                 }
             }
+
             function createPlayerOption(player) {
                 const variant = player.variants[0];
                 let imagePath = variant.image ? variant.image.replace(/\\/g, '/') : '';
-                const div = document.createElement('div'); div.className = 'player-option';
-                const img = document.createElement('img'); img.src = imagePath; img.alt = player.name;
-                img.onerror = () => { img.style.display = 'none'; div.style.backgroundColor = '#d3d3d3'; nameSpan.style.background = 'rgba(0,0,0,0.5)'; nameSpan.style.color = 'white'; };
-                const nameSpan = document.createElement('span'); nameSpan.className = 'player-name'; nameSpan.textContent = player.name;
-                div.appendChild(img); div.appendChild(nameSpan);
+                const div = document.createElement('div');
+                div.className = 'player-option';
+                const img = document.createElement('img');
+                img.src = imagePath;
+                img.alt = player.name;
+                img.onerror = () => {
+                    img.style.display = 'none';
+                    div.style.backgroundColor = '#d3d3d3';
+                };
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'player-name';
+                nameSpan.textContent = player.name;
+                div.appendChild(img);
+                div.appendChild(nameSpan);
                 div.addEventListener('click', () => selectPlayer(player.name, currentPositionElement));
                 return div;
             }
+
             function selectPlayer(playerName, posElem) {
                 if (fieldPositions.has(posElem)) fieldPositions.delete(posElem);
                 fieldPositions.set(posElem, playerName);
@@ -657,24 +649,42 @@
                 updateOrderButtonVisibility();
                 closePanel();
             }
+
             function updatePositionDisplay(posElem, playerName) {
                 const player = playersData.find(p => p.name === playerName);
                 if (!player) return;
                 const variant = player.variants[0];
                 let imagePath = variant.image ? variant.image.replace(/\\/g, '/') : '';
-                const oldImg = posElem.querySelector('img'); if (oldImg) oldImg.remove();
-                const oldName = posElem.querySelector('.player-name'); if (oldName) oldName.remove();
-                const img = document.createElement('img'); img.src = imagePath; img.alt = playerName;
-                img.onerror = () => { img.style.display = 'none'; posElem.style.backgroundColor = '#d3d3d3'; nameSpan.style.background = 'rgba(0,0,0,0.5)'; nameSpan.style.color = 'white'; };
-                const nameSpan = document.createElement('span'); nameSpan.className = 'player-name'; nameSpan.textContent = playerName;
-                posElem.appendChild(img); posElem.appendChild(nameSpan);
+                const oldImg = posElem.querySelector('img');
+                if (oldImg) oldImg.remove();
+                const oldName = posElem.querySelector('.player-name');
+                if (oldName) oldName.remove();
+                const img = document.createElement('img');
+                img.src = imagePath;
+                img.alt = playerName;
+                img.onerror = () => {
+                    img.style.display = 'none';
+                    posElem.style.backgroundColor = '#d3d3d3';
+                };
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'player-name';
+                nameSpan.textContent = playerName;
+                posElem.appendChild(img);
+                posElem.appendChild(nameSpan);
                 posElem.classList.add('filled');
             }
-            function closePanel() { selectorPanel.classList.remove('active'); currentPositionElement = null; }
+
+            function closePanel() {
+                selectorPanel.classList.remove('active');
+                currentPositionElement = null;
+            }
+
             function clearField() {
                 positions.forEach(pos => {
-                    const img = pos.querySelector('img'); if (img) img.remove();
-                    const nameSpan = pos.querySelector('.player-name'); if (nameSpan) nameSpan.remove();
+                    const img = pos.querySelector('img');
+                    if (img) img.remove();
+                    const nameSpan = pos.querySelector('.player-name');
+                    if (nameSpan) nameSpan.remove();
                     pos.classList.remove('filled');
                     fieldPositions.delete(pos);
                 });
@@ -682,24 +692,45 @@
                 closePanel();
             }
 
+            // ========== ЗАГРУЗКА ДАННЫХ ==========
+            async function loadConfig() {
+                try {
+                    const res = await fetch('https://fantasyxi.abrdns.com/config');
+                    backendConfig = await res.json();
+                    return backendConfig;
+                } catch(e) {
+                    console.warn('Config load error', e);
+                    return {};
+                }
+            }
+
+            let team = urlParams.get('team') || 'Барселона';
+            document.getElementById('team-title').textContent = `Состав ${team}`;
+            const jsonFileName = team.toLowerCase() + '.json';
+
             async function loadTeamData() {
                 try {
                     const resp = await fetch(jsonFileName);
                     if (!resp.ok) throw new Error('Файл не найден');
                     playersData = await resp.json();
                     initApp();
-                } catch(e) { document.body.innerHTML += `<div style="color:red;text-align:center;">Ошибка: ${e.message}</div>`; }
+                } catch(e) {
+                    document.body.innerHTML += `<div style="color:red;text-align:center;">Ошибка: ${e.message}</div>`;
+                }
             }
 
             function initApp() {
                 positions.forEach(p => p.addEventListener('click', () => openSelector(p)));
                 closeSelector.addEventListener('click', closePanel);
                 document.getElementById('clearButton').addEventListener('click', clearField);
-                orderButton.addEventListener('click', () => { if (isTeamComplete()) showScreen('form'); });
+                orderButton.addEventListener('click', () => {
+                    if (isTeamComplete()) showScreen('form');
+                });
                 document.getElementById('backFromForm').addEventListener('click', () => showScreen('constructor'));
                 document.getElementById('backToConstructor').addEventListener('click', () => showScreen('constructor'));
                 document.getElementById('backToFormFromReview').addEventListener('click', () => showScreen('form'));
                 document.getElementById('editOrder').addEventListener('click', () => showScreen('form'));
+
                 document.getElementById('nextToConfirm').addEventListener('click', () => {
                     if (!validateSurname() || !validateName() || !validatePhone() || !validateAddress()) return;
                     customerData.surname = document.getElementById('surname').value.trim();
@@ -710,104 +741,55 @@
                     customerData.order_id = Math.floor(Math.random() * 9900) + 100;
                     showReviewScreen();
                 });
-                window.addEventListener('click', (e) => { if (!selectorPanel.contains(e.target) && !e.target.classList.contains('position')) closePanel(); });
+
+                window.addEventListener('click', (e) => {
+                    if (!selectorPanel.contains(e.target) && !e.target.classList.contains('position')) closePanel();
+                });
                 updateOrderButtonVisibility();
             }
 
-            loadTeamData();
-
-            // ---------- ОПЛАТА ----------
+            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ ==========
             let paymentIntegrationInitialized = false;
-            let paymentContainer = document.getElementById('paymentContainer');
+            let terminalKey = null; // будет взят из конфига
 
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
-                
-                document.activeElement?.blur();
-                customerData.order_id = Math.floor(Math.random() * 9900) + 100;
                 paymentInProgress = true;
-                showScreen('payment');
+                document.activeElement?.blur();
 
-                // ⚡ ВАЖНО: Сбрасываем интеграцию перед каждым открытием
-                resetPaymentIntegration();
-                
-                try {
-                    await startPayment();
-                } finally {
-                    paymentInProgress = false;
+                // Убедимся, что конфиг загружен
+                if (!backendConfig) {
+                    try { await loadConfig(); } catch(e) {}
                 }
+                terminalKey = backendConfig?.terminalKey || '1775395377330DEMO'; // fallback
+
+                showScreen('payment');
+                await new Promise(resolve => setTimeout(resolve, 50)); // дадим DOM обновиться
+                await startPayment();
+                paymentInProgress = false;
             });
 
             document.getElementById('backToReviewFromPayment').addEventListener('click', () => {
-                resetPaymentIntegration();
+                if (window.PaymentIntegration && typeof PaymentIntegration.destroy === 'function') {
+                    PaymentIntegration.destroy();
+                }
+                paymentIntegrationInitialized = false;
+                document.getElementById('paymentContainer').innerHTML = '';
                 showScreen('review');
             });
 
-            function resetPaymentIntegration() {
-                try {
-                    if (window.PaymentIntegration?.destroy) {
-                        window.PaymentIntegration.destroy();
-                    }
-                } catch (e) {
-                    console.warn('destroy error', e);
-                }
-                
-                // Агрессивная очистка: удаляем ВСЕХ потомков
-                while (paymentContainer.firstChild) {
-                    paymentContainer.removeChild(paymentContainer.firstChild);
-                }
-                
-                // Принудительно очищаем innerHTML
-                paymentContainer.innerHTML = '';
-                
-                paymentIntegrationInitialized = false;
-            }
-
-            function recreatePaymentContainer() {
-                const old = document.getElementById('paymentContainer');
-                
-                // Создаём полностью новый элемент
-                const fresh = document.createElement('div');
-                fresh.id = 'paymentContainer';
-                fresh.style.width = '100%';
-                fresh.style.minHeight = '500px';
-                fresh.style.marginTop = '20px';
-                fresh.style.background = 'white';
-                fresh.style.borderRadius = '12px';
-                fresh.style.overflow = 'hidden';
-                
-                // Заменяем старый на новый
-                old.parentNode.replaceChild(fresh, old);
-                
-                // Обновляем глобальную ссылку
-                paymentContainer = fresh;
-                
-                return fresh;
-            }
-
             async function startPayment() {
-                resetPaymentIntegration();
-                
-                // Небольшая задержка для полной очистки
-                await new Promise(resolve => setTimeout(resolve, 400));
-                
-                paymentContainer = recreatePaymentContainer();
-                
+                // Сначала очистим контейнер
+                const container = document.getElementById('paymentContainer');
+                container.innerHTML = '';
+
                 if (!window.PaymentIntegration) {
-                    alert('Платёжный модуль ещё не загружен, попробуйте через секунду');
+                    alert('Платёжный модуль не загружен. Попробуйте обновить страницу.');
                     showScreen('review');
                     return;
                 }
-                
-                if (paymentIntegrationInitialized) {
-                    await PaymentIntegration.destroy?.();
-                    paymentIntegrationInitialized = false;
-                }
-                
-                const orderId = customerData.order_id;
-                const amount = 100;
 
-                // Сохраняем заказ для возврата после T-Pay
+                // Готовим заказ для сохранения
                 const tgUser = getTelegramUser();
                 const pendingOrderObj = {
                     order_id: customerData.order_id,
@@ -828,43 +810,82 @@
                     const posDiv = wrapper.querySelector('.position');
                     const labelDiv = wrapper.querySelector('.position-label');
                     const playerName = fieldPositions.get(posDiv);
-                    if (playerName) pendingOrderObj.players.push({ position: labelDiv.textContent, name: playerName });
+                    if (playerName) pendingOrderObj.players.push({
+                        position: labelDiv.textContent,
+                        name: playerName
+                    });
                 });
-                sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrderObj));
 
+                // Сохраняем в оба хранилища
+                const orderString = JSON.stringify(pendingOrderObj);
+                sessionStorage.setItem('pendingOrder', orderString);
+                localStorage.setItem('pendingOrder', orderString);
+
+                // URL для возврата после внешней оплаты
+                const baseUrl = window.location.origin + window.location.pathname;
+                const successUrl = baseUrl + '?Success=true';
+                const failUrl = baseUrl + '?Success=false';
+
+                // Запрашиваем PaymentURL у бэкенда (передаём и success/fail URL)
+                let paymentUrl;
+                try {
+                    const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            order_id: customerData.order_id,
+                            amount: 100,
+                            phone: customerData.phone,
+                            success_url: successUrl,
+                            fail_url: failUrl
+                        })
+                    });
+                    const data = await resp.json();
+                    if (!data.PaymentURL) throw new Error('No PaymentURL');
+                    paymentUrl = data.PaymentURL;
+                } catch(e) {
+                    console.error(e);
+                    alert('Ошибка создания платежа');
+                    showScreen('review');
+                    return;
+                }
+
+                // Конфигурация платёжного виджета (быстрые кнопки)
                 const initConfig = {
-                    terminalKey: '1775395377330DEMO',
+                    terminalKey: terminalKey,
                     product: 'eacq',
                     features: {
-                        iframe: {
-                            container: paymentContainer,
+                        payment: {
+                            container: container,
+                            widgetTypes: ['tpay', 'sbp', 'sberpay', 'mirpay'],
+                            // Функция, возвращающая PaymentURL (для методов, требующих его)
                             paymentStartCallback: async () => {
-                                const resp = await fetch(`${BACKEND_URL}/init-payment`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        order_id: orderId,
-                                        amount: amount,
-                                        phone: customerData.phone
-                                    })
-                                });
-                                const data = await resp.json();
-                                if (!data.PaymentURL) throw new Error('Не удалось получить PaymentURL');
-                                return data.PaymentURL;
+                                return paymentUrl;
                             },
                             config: {
                                 status: {
-                                    changedCallback: async (status) => {
+                                    changedCallback: (status) => {
                                         console.log('Статус платежа:', status);
                                         if (status === 'SUCCESS') {
+                                            // Успешная оплата (в том числе и после возврата)
                                             window.sendOrderToBot();
-                                            paymentContainer.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
+                                            container.innerHTML = `
+                                                <div style="text-align:center; padding:40px;">
+                                                    <h3>✅ Оплата прошла успешно!</h3>
+                                                    <p>Спасибо за заказ. Приложение закроется через несколько секунд...</p>
+                                                </div>`;
+                                            sessionStorage.removeItem('pendingOrder');
+                                            localStorage.removeItem('pendingOrder');
                                         } else if (status === 'REJECTED' || status === 'CANCELED') {
-                                            // Небольшая задержка перед возвратом
                                             setTimeout(() => {
                                                 alert('❌ Оплата не прошла. Попробуйте снова.');
-                                                resetPaymentIntegration();
+                                                if (window.PaymentIntegration && typeof PaymentIntegration.destroy === 'function') {
+                                                    PaymentIntegration.destroy();
+                                                }
                                                 showScreen('review');
+                                                // Очищаем сохранённый заказ при отказе
+                                                sessionStorage.removeItem('pendingOrder');
+                                                localStorage.removeItem('pendingOrder');
                                             }, 500);
                                         }
                                     }
@@ -873,17 +894,24 @@
                         }
                     }
                 };
-                
+
                 try {
                     await PaymentIntegration.init(initConfig);
                     paymentIntegrationInitialized = true;
-                } catch (err) {
+                } catch(err) {
                     console.error(err);
                     alert('Ошибка запуска оплаты: ' + (err.message || 'неизвестная ошибка'));
-                    resetPaymentIntegration();
                     showScreen('review');
+                    sessionStorage.removeItem('pendingOrder');
+                    localStorage.removeItem('pendingOrder');
                 }
             }
+
+            // Запускаем загрузку данных после получения конфига
+            (async function main() {
+                try { await loadConfig(); } catch(e) {}
+                await loadTeamData();
+            })();
         })();
     </script>
 </body>
