@@ -3,6 +3,7 @@ import os
 import json
 import logging
 import hashlib
+import uuid
 import requests
 
 from flask import Flask, request, jsonify
@@ -42,7 +43,7 @@ logger = logging.getLogger("bot")
 app = Flask(__name__)
 CORS(app)
 
-# ========== REQUESTS SESSION (CONNECTION POOL + RETRY) ==========
+# ========== REQUESTS SESSION ==========
 session = requests.Session()
 
 retry = Retry(
@@ -69,17 +70,11 @@ telebot.apihelper.session = session
 
 
 def safe_send_message(chat_id, text, **kwargs):
-    """Telegram send with retry-safe session"""
     try:
         return bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
         logger.warning(f"Telegram send failed: {e}")
         return None
-
-
-def async_telegram_task(fn, *args, **kwargs):
-    """Запуск Telegram задач через gevent (совместимо с gunicorn gevent)"""
-    gevent.spawn(fn, *args, **kwargs)
 
 
 def generate_token(data: dict, password: str):
@@ -93,25 +88,27 @@ def generate_token(data: dict, password: str):
     concat = "".join(str(v) for k, v in sorted_items)
     return hashlib.sha256(concat.encode()).hexdigest()
 
+# ========== PAYMENT (НОВЫЙ ПОРЯДОК) ==========
 
-# ========== PAYMENT ==========
+
 @app.route('/init-payment', methods=['POST'])
 def init_payment():
     logger.info("💳 INIT PAYMENT")
 
     body = request.json
-    order_id = body.get("order_id")
     customer_phone = body.get("phone") or "79999999999"
-    success_url = body.get("success_url")   # для редиректа после оплаты
+    success_url = body.get("success_url")
     fail_url = body.get("fail_url")
 
-    # Сумма ТОЛЬКО на бэкенде (в копейках)
-    AMOUNT = 100  # 1 рубль для теста
+    # Уникальный ID заказа генерирует бэкенд
+    order_id = str(uuid.uuid4().hex[:10])  # короткий уникальный ID
+
+    AMOUNT = 100  # копейки
 
     payload = {
         "TerminalKey": TERMINAL_KEY,
         "Amount": AMOUNT,
-        "OrderId": str(order_id),
+        "OrderId": order_id,
         "Description": "Football Dream Team",
         "Receipt": {
             "Phone": customer_phone,
@@ -128,7 +125,6 @@ def init_payment():
         }
     }
 
-    # Добавляем URL возврата, если переданы
     if success_url:
         payload["SuccessURL"] = success_url
     if fail_url:
@@ -139,7 +135,10 @@ def init_payment():
     try:
         resp = session.post(TINKOFF_INIT_URL, json=payload, timeout=5)
         data = resp.json()
-        return jsonify({"PaymentURL": data.get("PaymentURL")})
+        return jsonify({
+            "PaymentURL": data.get("PaymentURL"),
+            "order_id": order_id
+        })
     except Exception as e:
         logger.error(f"❌ PAYMENT ERROR: {e}")
         return jsonify({"error": str(e)}), 500
@@ -158,8 +157,9 @@ def get_config():
         "terminalKey": TERMINAL_KEY
     })
 
+# ========== TELEGRAM PROCESSORS (без изменений) ==========
 
-# ========== TELEGRAM PROCESSORS (GREENLET-BASED) ==========
+
 def process_webapp_data(message):
     try:
         chat_id = message['chat']['id']
@@ -252,7 +252,6 @@ def process_start(message):
 
 
 def process_unknown_message(message):
-    """Обработка неизвестных сообщений"""
     try:
         chat_id = message['chat']['id']
         safe_send_message(
@@ -262,8 +261,9 @@ def process_unknown_message(message):
     except Exception as e:
         logger.error(f"❌ unknown message error: {e}")
 
-
 # ========== WEBHOOK ==========
+
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update_json = request.get_json(silent=True)
@@ -277,19 +277,18 @@ def webhook():
     if not message:
         return jsonify({'ok': True})
 
-    # ⚡ GEVENT-СОВМЕСТИМЫЙ ЗАПУСК В ФОНЕ
     if 'web_app_data' in message:
         gevent.spawn(process_webapp_data, message)
     elif 'text' in message and message.get('text') == '/start':
         gevent.spawn(process_start, message)
     else:
-        # Обрабатываем неизвестные сообщения
         gevent.spawn(process_unknown_message, message)
 
-    return jsonify({'ok': True})  # ⚡ мгновенный ответ Telegram
-
+    return jsonify({'ok': True})
 
 # ========== HEALTH ==========
+
+
 @app.route('/health')
 def health():
     return "OK", 200
@@ -299,8 +298,9 @@ def health():
 def index():
     return jsonify({"status": "ok"})
 
-
 # ========== WEBHOOK SET ==========
+
+
 def set_webhook():
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)

@@ -118,12 +118,8 @@
             box-shadow: 0 -4px 12px rgba(0,0,0,0.2);
             padding: 16px;
             max-height: 60vh;
-        }
-        .selector-panel {
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
-            touch-action: pan-y;
-            position: fixed;
             z-index: 1000;
         }
         .selector-panel.active { display: block; }
@@ -246,35 +242,40 @@
         }
         .screen.active { display: block; }
         #constructorScreen { padding-bottom: 120px; }
+        
+        /* Платёжный контейнер */
         #paymentContainer {
             width: 100%;
-            margin-top: 20px;
+            max-width: 400px;
+            margin: 20px auto;
             background: white;
-            border-radius: 12px;
-            padding: 16px;
+            border-radius: 20px;
+            padding: 24px 20px;
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 28px;
         }
-        #quickPaymentButtons {
-            min-height: 60px;
+        #tpayWidget {
+            display: flex;
+            justify-content: center;
         }
-        #cardPaymentIframe {
+        #fastWidgets {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        #cardWidget {
             min-height: 350px;
         }
-        #cardPaymentIframe iframe {
+        #cardWidget iframe {
             border: none;
             display: block;
             width: 100%;
             min-height: 350px;
             background: white;
         }
-        .payment-loader {
-            text-align: center;
-            padding: 40px;
-            font-size: 18px;
-            color: #666;
-        }
+        
         body, html {
             height: 100%;
             overflow: hidden;
@@ -358,7 +359,7 @@
             </div>
         </div>
 
-        <!-- Шаг 3: Проверка заказа (без оплаты) -->
+        <!-- Шаг 3: Проверка заказа -->
         <div id="reviewScreen" class="screen">
             <button class="back-button" id="backToFormFromReview">← Назад</button>
             <div class="form-container">
@@ -371,13 +372,14 @@
             </div>
         </div>
 
-        <!-- Шаг 4: Экран оплаты -->
+        <!-- Шаг 4: Оплата -->
         <div id="paymentScreen" class="screen">
             <button class="back-button" id="backToReviewFromPayment">← Назад к заказу</button>
             <h2>Оплата заказа</h2>
             <div id="paymentContainer">
-                <div id="quickPaymentButtons"></div>
-                <div id="cardPaymentIframe"></div>
+                <div id="tpayWidget"></div>
+                <div id="fastWidgets"></div>
+                <div id="cardWidget"></div>
             </div>
         </div>
     </div>
@@ -388,7 +390,7 @@
         (function() {
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
 
-            // ========== ВОЗВРАТ ПОСЛЕ ОПЛАТЫ (внешние сервисы) ==========
+            // ========== ВОЗВРАТ ПОСЛЕ ОПЛАТЫ ==========
             const urlParams = new URLSearchParams(window.location.search);
             const paymentStatus = urlParams.get('Success');
 
@@ -431,7 +433,6 @@
             const formScreen = document.getElementById('formScreen');
             const reviewScreen = document.getElementById('reviewScreen');
             const paymentScreen = document.getElementById('paymentScreen');
-
             const positions = document.querySelectorAll('.position');
             const positionWrappers = document.querySelectorAll('.position-wrapper');
             const selectorPanel = document.getElementById('selectorPanel');
@@ -473,13 +474,12 @@
                 orderButton.style.display = isTeamComplete() ? 'inline-block' : 'none';
             }
 
-            // ========== DADATA (надёжная инициализация) ==========
+            // ========== DADATA ==========
             async function initDaData() {
                 const input = document.getElementById('address');
                 if (!input || input.dataset.dadataInit === "1") return;
 
-                // Ждём, пока jQuery и suggestions станут доступны
-                const maxWait = 10000; // 10 секунд
+                const maxWait = 10000;
                 const startTime = Date.now();
                 while ((!window.jQuery || !jQuery.fn.suggestions) && (Date.now() - startTime) < maxWait) {
                     await new Promise(r => setTimeout(r, 100));
@@ -758,7 +758,6 @@
                     customerData.patronymic = document.getElementById('patronymic').value.trim();
                     customerData.phone = iti.getNumber();
                     customerData.address = document.getElementById('address').value.trim();
-                    customerData.order_id = Math.floor(Math.random() * 9900) + 100;
                     showReviewScreen();
                 });
 
@@ -768,8 +767,10 @@
                 updateOrderButtonVisibility();
             }
 
-            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ (БЫСТРЫЕ КНОПКИ + КАРТА) ==========
+            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ ==========
             let terminalKey = null;
+            let currentPaymentId = null;
+            const activeIntegrations = [];
 
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
@@ -781,27 +782,34 @@
                 }
                 terminalKey = backendConfig?.terminalKey || '1775395377330DEMO';
 
+                destroyAllIntegrations();
                 showScreen('payment');
-                // Очищаем контейнеры
-                document.getElementById('quickPaymentButtons').innerHTML = '';
-                document.getElementById('cardPaymentIframe').innerHTML = '';
-                await new Promise(resolve => setTimeout(resolve, 50));
+
+                await new Promise(r => setTimeout(r, 100));
                 await startPayment();
                 paymentInProgress = false;
             });
 
             document.getElementById('backToReviewFromPayment').addEventListener('click', () => {
-                if (window.PaymentIntegration && typeof PaymentIntegration.destroy === 'function') {
-                    PaymentIntegration.destroy();
-                }
-                document.getElementById('quickPaymentButtons').innerHTML = '';
-                document.getElementById('cardPaymentIframe').innerHTML = '';
+                destroyAllIntegrations();
                 showScreen('review');
             });
 
+            function destroyAllIntegrations() {
+                activeIntegrations.forEach(integration => {
+                    try { integration.destroy(); } catch(e) {}
+                });
+                activeIntegrations.length = 0;
+                document.getElementById('tpayWidget').innerHTML = '';
+                document.getElementById('fastWidgets').innerHTML = '';
+                document.getElementById('cardWidget').innerHTML = '';
+                currentPaymentId = null;
+            }
+
             async function startPayment() {
-                const quickContainer = document.getElementById('quickPaymentButtons');
-                const cardContainer = document.getElementById('cardPaymentIframe');
+                const tpayContainer = document.getElementById('tpayWidget');
+                const fastContainer = document.getElementById('fastWidgets');
+                const cardContainer = document.getElementById('cardWidget');
 
                 if (!window.PaymentIntegration) {
                     alert('Платёжный модуль не загружен. Попробуйте обновить страницу.');
@@ -809,10 +817,34 @@
                     return;
                 }
 
+                // Получаем order_id и PaymentURL с бэкенда
+                let paymentUrl, orderId;
+                try {
+                    const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            phone: customerData.phone,
+                            success_url: window.location.origin + window.location.pathname + '?Success=true',
+                            fail_url: window.location.origin + window.location.pathname + '?Success=false'
+                        })
+                    });
+                    const data = await resp.json();
+                    if (!data.PaymentURL || !data.order_id) throw new Error('Invalid response');
+                    paymentUrl = data.PaymentURL;
+                    orderId = data.order_id;
+                    customerData.order_id = orderId;
+                } catch(e) {
+                    console.error(e);
+                    alert('Ошибка создания платежа');
+                    showScreen('review');
+                    return;
+                }
+
                 // Сохраняем заказ
                 const tgUser = getTelegramUser();
                 const pendingOrderObj = {
-                    order_id: customerData.order_id,
+                    order_id: orderId,
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
                     customer: {
@@ -835,60 +867,26 @@
                         name: playerName
                     });
                 });
+                const orderStr = JSON.stringify(pendingOrderObj);
+                sessionStorage.setItem('pendingOrder', orderStr);
+                localStorage.setItem('pendingOrder', orderStr);
 
-                const orderString = JSON.stringify(pendingOrderObj);
-                sessionStorage.setItem('pendingOrder', orderString);
-                localStorage.setItem('pendingOrder', orderString);
+                currentPaymentId = orderId;
 
-                const baseUrl = window.location.origin + window.location.pathname;
-                const successUrl = baseUrl + '?Success=true';
-                const failUrl = baseUrl + '?Success=false';
-
-                // Получаем PaymentURL
-                let paymentUrl;
-                try {
-                    const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            order_id: customerData.order_id,
-                            amount: 100,
-                            phone: customerData.phone,
-                            success_url: successUrl,
-                            fail_url: failUrl
-                        })
-                    });
-                    const data = await resp.json();
-                    if (!data.PaymentURL) throw new Error('No PaymentURL');
-                    paymentUrl = data.PaymentURL;
-                } catch(e) {
-                    console.error(e);
-                    alert('Ошибка создания платежа');
-                    showScreen('review');
-                    return;
-                }
-
-                // Единый обработчик изменения статуса
+                // Общий обработчик статуса
                 const statusChanged = (status) => {
-                    console.log('Статус платежа:', status);
+                    if (currentPaymentId !== orderId) return;
                     if (status === 'SUCCESS') {
                         window.sendOrderToBot();
-                        quickContainer.innerHTML = '';
-                        cardContainer.innerHTML = `
-                            <div style="text-align:center; padding:40px;">
-                                <h3>✅ Оплата прошла успешно!</h3>
-                                <p>Спасибо за заказ. Приложение закроется через несколько секунд...</p>
-                            </div>`;
+                        destroyAllIntegrations();
+                        document.getElementById('paymentContainer').innerHTML =
+                            '<div style="text-align:center; padding:40px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
                         sessionStorage.removeItem('pendingOrder');
                         localStorage.removeItem('pendingOrder');
                     } else if (status === 'REJECTED' || status === 'CANCELED') {
                         setTimeout(() => {
                             alert('❌ Оплата не прошла. Попробуйте снова.');
-                            if (window.PaymentIntegration && typeof PaymentIntegration.destroy === 'function') {
-                                PaymentIntegration.destroy();
-                            }
-                            quickContainer.innerHTML = '';
-                            cardContainer.innerHTML = '';
+                            destroyAllIntegrations();
                             showScreen('review');
                             sessionStorage.removeItem('pendingOrder');
                             localStorage.removeItem('pendingOrder');
@@ -896,48 +894,66 @@
                     }
                 };
 
-                const initConfig = {
-                    terminalKey: terminalKey,
-                    product: 'eacq',
-                    features: {
-                        // Быстрые кнопки (T-Pay, СБП, SberPay, Mir Pay)
-                        payment: {
-                            container: quickContainer,
-                            widgetTypes: ['tpay', 'sbp', 'sberpay', 'mirpay'],
-                            paymentStartCallback: async () => paymentUrl,
-                            config: {
-                                status: {
-                                    changedCallback: statusChanged
-                                }
+                // 1. Виджет T‑Pay (отдельно)
+                try {
+                    const tpayInstance = PaymentIntegration.create({
+                        terminalKey: terminalKey,
+                        product: 'eacq',
+                        features: {
+                            payment: {
+                                container: tpayContainer,
+                                widgetTypes: ['tpay'],
+                                paymentStartCallback: async () => paymentUrl,
+                                config: { status: { changedCallback: statusChanged } }
                             }
-                        },
-                        // Форма ввода карты
-                        iframe: {
-                            container: cardContainer,
-                            paymentStartCallback: async () => paymentUrl,
-                            config: {
-                                status: {
-                                    changedCallback: statusChanged
+                        }
+                    });
+                    activeIntegrations.push(tpayInstance);
+                    await tpayInstance.init();
+                } catch(e) { console.warn('TPay widget error', e); }
+
+                // 2. SberPay + СБП
+                try {
+                    const fastInstance = PaymentIntegration.create({
+                        terminalKey: terminalKey,
+                        product: 'eacq',
+                        features: {
+                            payment: {
+                                container: fastContainer,
+                                widgetTypes: ['sberpay', 'sbp'],
+                                paymentStartCallback: async () => paymentUrl,
+                                config: { status: { changedCallback: statusChanged } }
+                            }
+                        }
+                    });
+                    activeIntegrations.push(fastInstance);
+                    await fastInstance.init();
+                } catch(e) { console.warn('Fast widgets error', e); }
+
+                // 3. Оплата картой (iframe, без быстрых кнопок)
+                try {
+                    const cardInstance = PaymentIntegration.create({
+                        terminalKey: terminalKey,
+                        product: 'eacq',
+                        features: {
+                            iframe: {
+                                container: cardContainer,
+                                paymentStartCallback: async () => paymentUrl,
+                                config: {
+                                    status: { changedCallback: statusChanged },
+                                    features: { payment: false }
                                 }
                             }
                         }
-                    }
-                };
-
-                try {
-                    await PaymentIntegration.init(initConfig);
-                } catch(err) {
-                    console.error(err);
-                    alert('Ошибка запуска оплаты: ' + (err.message || 'неизвестная ошибка'));
-                    showScreen('review');
-                    sessionStorage.removeItem('pendingOrder');
-                    localStorage.removeItem('pendingOrder');
-                }
+                    });
+                    activeIntegrations.push(cardInstance);
+                    await cardInstance.init();
+                } catch(e) { console.warn('Card widget error', e); }
             }
 
-            // Запуск
+            // ========== ЗАПУСК ==========
             (async function main() {
-                try { await loadConfig(); } catch(e) {}
+                await loadConfig();
                 await loadTeamData();
             })();
         })();
