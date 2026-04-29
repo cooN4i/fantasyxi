@@ -386,7 +386,7 @@
         </div>
     </div>
 
-    <script src="https://integrationjs.t-static.ru/integration.js"></script>
+    <script src="https://integrationjs.tbank.ru/integration.js"></script>
 
     <script>
         (function() {
@@ -397,7 +397,6 @@
             const paymentStatus = urlParams.get('Success');
             
             if (paymentStatus === 'true') {
-                // Платёж успешен — отправляем заказ
                 const savedOrder = sessionStorage.getItem('pendingOrder');
                 if (savedOrder) {
                     try {
@@ -408,23 +407,23 @@
                         console.error('Send error:', e);
                     }
                 }
-                return; // Не продолжаем загрузку конструктора
+                return;
             }
             
             if (paymentStatus === 'false') {
                 alert('❌ Оплата не прошла. Попробуйте снова.');
             }
-            // ========== КОНЕЦ ПРОВЕРКИ ==========
 
-            // === КОНФИГУРАЦИЯ (динамическая) ===
+            // === КОНФИГУРАЦИЯ ===
             let BACKEND_URL = 'https://fantasyxi.abrdns.com';
+            let TERMINAL_KEY = '';
             
-            // Загружаем конфигурацию с бэкенда
             async function loadConfig() {
                 try {
                     const res = await fetch(`${BACKEND_URL}/config`);
                     const config = await res.json();
                     if (config.backendUrl) BACKEND_URL = config.backendUrl;
+                    if (config.terminalKey) TERMINAL_KEY = config.terminalKey;
                     return config;
                 } catch(e) {
                     console.warn('Не удалось загрузить конфиг, используем fallback', e);
@@ -691,7 +690,8 @@
                 } catch(e) { document.body.innerHTML += `<div style="color:red;text-align:center;">Ошибка: ${e.message}</div>`; }
             }
 
-            function initApp() {
+            async function initApp() {
+                await loadConfig();
                 positions.forEach(p => p.addEventListener('click', () => openSelector(p)));
                 closeSelector.addEventListener('click', closePanel);
                 document.getElementById('clearButton').addEventListener('click', clearField);
@@ -716,8 +716,9 @@
 
             loadTeamData();
 
-            // ---------- ОПЛАТА ----------
+            // ---------- ОПЛАТА (НОВЫЙ СПОСОБ) ----------
             let paymentIntegrationInitialized = false;
+            let mainPaymentIntegration = null;
             let paymentContainer = document.getElementById('paymentContainer');
 
             document.getElementById('payButton').addEventListener('click', async () => {
@@ -728,7 +729,6 @@
                 paymentInProgress = true;
                 showScreen('payment');
 
-                // ⚡ ВАЖНО: Сбрасываем интеграцию перед каждым открытием
                 resetPaymentIntegration();
                 
                 try {
@@ -745,6 +745,9 @@
 
             function resetPaymentIntegration() {
                 try {
+                    if (mainPaymentIntegration?.unmount) {
+                        mainPaymentIntegration.unmount();
+                    }
                     if (window.PaymentIntegration?.destroy) {
                         window.PaymentIntegration.destroy();
                     }
@@ -752,46 +755,19 @@
                     console.warn('destroy error', e);
                 }
                 
-                // Агрессивная очистка: удаляем ВСЕХ потомков
                 while (paymentContainer.firstChild) {
                     paymentContainer.removeChild(paymentContainer.firstChild);
                 }
-                
-                // Принудительно очищаем innerHTML
                 paymentContainer.innerHTML = '';
                 
+                mainPaymentIntegration = null;
                 paymentIntegrationInitialized = false;
-            }
-
-            function recreatePaymentContainer() {
-                const old = document.getElementById('paymentContainer');
-                
-                // Создаём полностью новый элемент
-                const fresh = document.createElement('div');
-                fresh.id = 'paymentContainer';
-                fresh.style.width = '100%';
-                fresh.style.minHeight = '500px';
-                fresh.style.marginTop = '20px';
-                fresh.style.background = 'white';
-                fresh.style.borderRadius = '12px';
-                fresh.style.overflow = 'hidden';
-                
-                // Заменяем старый на новый
-                old.parentNode.replaceChild(fresh, old);
-                
-                // Обновляем глобальную ссылку
-                paymentContainer = fresh;
-                
-                return fresh;
             }
 
             async function startPayment() {
                 resetPaymentIntegration();
                 
-                // Небольшая задержка для полной очистки
                 await new Promise(resolve => setTimeout(resolve, 400));
-                
-                paymentContainer = recreatePaymentContainer();
                 
                 if (!window.PaymentIntegration) {
                     alert('Платёжный модуль ещё не загружен, попробуйте через секунду');
@@ -799,15 +775,7 @@
                     return;
                 }
                 
-                if (paymentIntegrationInitialized) {
-                    await PaymentIntegration.destroy?.();
-                    paymentIntegrationInitialized = false;
-                }
-                
-                const orderId = customerData.order_id;
-                const amount = 100;
-
-                // Сохраняем заказ для возврата после T-Pay
+                // Сохраняем заказ для возврата после T-Pay/SBP/Mir Pay
                 const tgUser = getTelegramUser();
                 const pendingOrderObj = {
                     order_id: customerData.order_id,
@@ -833,50 +801,58 @@
                 sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrderObj));
 
                 const initConfig = {
-                    terminalKey: '1775395377330DEMO',
+                    terminalKey: TERMINAL_KEY,
                     product: 'eacq',
                     features: {
-                        iframe: {
-                            container: paymentContainer,
-                            paymentStartCallback: async () => {
-                                const resp = await fetch(`${BACKEND_URL}/init-payment`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        order_id: orderId,
-                                        amount: amount,
-                                        phone: customerData.phone
-                                    })
-                                });
-                                const data = await resp.json();
-                                if (!data.PaymentURL) throw new Error('Не удалось получить PaymentURL');
-                                return data.PaymentURL;
-                            },
-                            config: {
-                                status: {
-                                    changedCallback: async (status) => {
-                                        console.log('Статус платежа:', status);
-                                        if (status === 'SUCCESS') {
-                                            window.sendOrderToBot();
-                                            paymentContainer.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
-                                        } else if (status === 'REJECTED' || status === 'CANCELED') {
-                                            // Небольшая задержка перед возвратом
-                                            setTimeout(() => {
-                                                alert('❌ Оплата не прошла. Попробуйте снова.');
-                                                resetPaymentIntegration();
-                                                showScreen('review');
-                                            }, 500);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                        payment: {},
+                    },
                 };
-                
+
                 try {
-                    await PaymentIntegration.init(initConfig);
+                    const integration = await PaymentIntegration.init(initConfig);
                     paymentIntegrationInitialized = true;
+
+                    const MAIN_INTEGRATION_NAME = 'fantasy-payment';
+                    const MAIN_INTEGRATION_CONFIG = {};
+
+                    mainPaymentIntegration = await integration.payments.create(
+                        MAIN_INTEGRATION_NAME,
+                        MAIN_INTEGRATION_CONFIG,
+                    );
+
+                    await mainPaymentIntegration.mount(paymentContainer);
+
+                    await integration.payments.setPaymentStartCallback(async () => {
+                        const helpers = new PaymentIntegration.Helpers();
+                        const resp = await helpers.request(
+                            `${BACKEND_URL}/init-payment`,
+                            'POST',
+                            {
+                                order_id: customerData.order_id,
+                                phone: customerData.phone
+                            }
+                        );
+                        return resp.paymentUrl || resp.PaymentURL;
+                    });
+
+                    integration.on('paymentStatusChanged', (event) => {
+                        console.log('Статус платежа:', event.status);
+                        
+                        if (event.status === 'SUCCESS') {
+                            window.sendOrderToBot();
+                            paymentContainer.innerHTML = '<div style="text-align:center; padding:40px; background:white; border-radius:20px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
+                        } else if (event.status === 'REJECTED' || event.status === 'CANCELED') {
+                            setTimeout(() => {
+                                alert('❌ Оплата не прошла. Попробуйте снова.');
+                                resetPaymentIntegration();
+                                showScreen('review');
+                            }, 500);
+                        }
+                    });
+
+                    const widgetTypes = ['card', 'mirpay', 'sbp', 'tpay'];
+                    await mainPaymentIntegration.updateWidgetTypes(widgetTypes);
+
                 } catch (err) {
                     console.error(err);
                     alert('Ошибка запуска оплаты: ' + (err.message || 'неизвестная ошибка'));

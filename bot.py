@@ -107,12 +107,14 @@ def init_payment():
 
     body = request.json
     order_id = body.get("order_id")
-    amount = body.get("amount", 1000)
     customer_phone = body.get("phone") or "79999999999"
+
+    # Сумма ТОЛЬКО на бэкенде (в копейках)
+    AMOUNT = 100  # 1 рубль для теста
 
     payload = {
         "TerminalKey": TERMINAL_KEY,
-        "Amount": amount,
+        "Amount": AMOUNT,
         "OrderId": str(order_id),
         "Description": "Football Dream Team",
         "Receipt": {
@@ -121,9 +123,9 @@ def init_payment():
             "Items": [
                 {
                     "Name": "Футбольный состав",
-                    "Price": amount,
+                    "Price": AMOUNT,
                     "Quantity": 1,
-                    "Amount": amount,
+                    "Amount": AMOUNT,
                     "Tax": "none"
                 }
             ]
@@ -150,7 +152,8 @@ def get_dadata_token():
 def get_config():
     return jsonify({
         "dadataToken": DADATA_TOKEN,
-        "backendUrl": os.getenv("BACKEND_URL")
+        "backendUrl": os.getenv("BACKEND_URL"),
+        "terminalKey": TERMINAL_KEY
     })
 
 
@@ -212,7 +215,7 @@ def process_webapp_data(message):
         safe_send_message(
             chat_id,
             f"✅ Заказ №{order_id} успешно оформлен!\n\n"
-            f"📩 При возникновении вопросов напишите в поддержку\n\n"
+            f"📩 При возникновении вопросов напишите в поддержку.\n\n"
             f"Спасибо за выбор Fantasy XI 🫶",
             parse_mode="HTML",
             reply_markup=markup
@@ -237,8 +240,8 @@ def process_start(message):
         safe_send_message(
             chat_id,
             "👋 Привет!\n\n"
-            "Добро пожаловать в Fantasy XI - бот для создания футбольных составов\n\n"
-            "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду",
+            "Добро пожаловать в Fantasy Constructor - бот для создания футбольных составов.\n\n"
+            "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду.",
             reply_markup=markup
         )
 
@@ -281,7 +284,7 @@ def webhook():
         # Обрабатываем неизвестные сообщения
         gevent.spawn(process_unknown_message, message)
 
-    return jsonify({'ok': True})
+    return jsonify({'ok': True})  # ⚡ мгновенный ответ Telegram
 
 
 # ========== HEALTH ==========
