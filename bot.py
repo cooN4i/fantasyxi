@@ -376,7 +376,7 @@ def webhook():
     else:
         gevent.spawn(process_unknown_message, message)
 
-    return jsonify({'ok': True'})
+    return jsonify({'ok': 'True'})
 
 # ========== HEALTH ==========
 
