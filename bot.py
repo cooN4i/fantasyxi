@@ -103,7 +103,7 @@ def init_payment():
     # Генерируем случайный номер заказа (число от 1 до 10000)
     order_id = str(random.randint(1, 10000))
 
-    AMOUNT = 100  # копейки
+    AMOUNT = 1000  # копейки
 
     payload = {
         "TerminalKey": TERMINAL_KEY,
