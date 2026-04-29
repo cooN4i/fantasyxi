@@ -68,8 +68,6 @@ bot = telebot.TeleBot(TOKEN, threaded=False)
 telebot.apihelper.session = session
 
 # ========== ХРАНЕНИЕ ЗАКАЗОВ ==========
-# Внимание: словарь живёт только в памяти. При рестарте сервера данные теряются.
-# Для продакшена лучше заменить на БД или файловое хранилище.
 orders = {}
 
 # ========== HELPERS ==========
@@ -86,15 +84,8 @@ def safe_send_message(chat_id, text, **kwargs):
 
 def generate_token(data: dict, password: str) -> str:
     """
-    Генерация токена (подписи) по документации Т-Банка:
+    Генерация токена (подписи) по документации Т-Банка.
     https://developer.tbank.ru/eacq/intro/developer/token
-
-    - Берем все ключи первого уровня
-    - Игнорируем вложенные словари и списки
-    - Добавляем Password
-    - Сортируем ключи по алфавиту
-    - Конкатенируем значения в одну строку
-    - Возвращаем SHA-256
     """
     pairs = {}
     for key, value in data.items():
@@ -157,7 +148,6 @@ def init_payment():
         resp = session.post(TINKOFF_INIT_URL, json=payload, timeout=5)
         data = resp.json()
 
-        # Сохраняем заказ
         orders[order_id] = {
             "status": "pending",
             "data": order_data
@@ -186,20 +176,19 @@ def payment_notification():
         logger.warning("❌ No Token in notification")
         return "OK", 200
 
-    data_for_sign = {k: v for k, v in data.items() if k != "Token"}
+    sign_data = {k: v for k, v in data.items() if k != "Token"}
 
-    # Генерируем токен именно из очищенных данных
-    generated_token = generate_token(data_for_sign, PASSWORD)
+    # Генерируем токен из очищенных данных
+    generated_token = generate_token(sign_data, PASSWORD)
 
-    # Временные логи для отладки (можно удалить после проверки)
+    # Логи для диагностики (можно удалить после проверки)
     logger.info(f"Received token: {received_token}")
     logger.info(f"Generated token: {generated_token}")
-    parsed_data = {k: v for k, v in data.items() if not isinstance(v, (dict, list))}
-    logger.info(f"Data for token: {parsed_data}")
+    logger.info(f"Sign data: {sign_data}")
 
     if received_token != generated_token:
         logger.warning("❌ INVALID TOKEN")
-        return "OK", 200  # Отвечаем OK, чтобы Т-Банк не слал повторы
+        return "OK", 200
 
     status = data.get("Status")
     order_id = data.get("OrderId")
@@ -243,7 +232,6 @@ def payment_notification():
 
         chat_id = customer.get("telegram_id")
 
-        # Отправка пользователю
         if chat_id:
             safe_send_message(
                 chat_id,
@@ -251,7 +239,6 @@ def payment_notification():
                 parse_mode="HTML"
             )
 
-        # Отправка админу
         if ADMIN_CHAT_ID:
             safe_send_message(
                 ADMIN_CHAT_ID,
@@ -360,7 +347,7 @@ def process_start(message):
         safe_send_message(
             chat_id,
             "👋 Привет!\n\n"
-            "Добро пожаловать в Fantasy Constructor - бот для создания футбольных составов.\n\n"
+            "Добро пожаловать в Fantasy XI - бот для создания футбольных составов.\n\n"
             "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду.",
             reply_markup=markup
         )
