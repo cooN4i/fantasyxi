@@ -767,10 +767,9 @@
                 updateOrderButtonVisibility();
             }
 
-            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ ==========
+            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ (ИСПРАВЛЕНО) ==========
             let terminalKey = null;
             let currentPaymentId = null;
-            const activeIntegrations = [];
 
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
@@ -782,35 +781,35 @@
                 }
                 terminalKey = backendConfig?.terminalKey || '1775395377330DEMO';
 
-                destroyAllIntegrations();
-                showScreen('payment');
+                // Жёсткое уничтожение предыдущей интеграции
+                if (window.PaymentIntegration) {
+                    try { PaymentIntegration.destroy(); } catch(e) {}
+                }
+                
+                // Очистка контейнеров
+                document.getElementById('tpayWidget').innerHTML = '';
+                document.getElementById('fastWidgets').innerHTML = '';
+                document.getElementById('cardWidget').innerHTML = '';
+                currentPaymentId = null;
 
+                showScreen('payment');
                 await new Promise(r => setTimeout(r, 100));
                 await startPayment();
                 paymentInProgress = false;
             });
 
             document.getElementById('backToReviewFromPayment').addEventListener('click', () => {
-                destroyAllIntegrations();
-                showScreen('review');
-            });
-
-            function destroyAllIntegrations() {
-                activeIntegrations.forEach(integration => {
-                    try { integration.destroy(); } catch(e) {}
-                });
-                activeIntegrations.length = 0;
+                if (window.PaymentIntegration) {
+                    try { PaymentIntegration.destroy(); } catch(e) {}
+                }
                 document.getElementById('tpayWidget').innerHTML = '';
                 document.getElementById('fastWidgets').innerHTML = '';
                 document.getElementById('cardWidget').innerHTML = '';
                 currentPaymentId = null;
-            }
+                showScreen('review');
+            });
 
             async function startPayment() {
-                const tpayContainer = document.getElementById('tpayWidget');
-                const fastContainer = document.getElementById('fastWidgets');
-                const cardContainer = document.getElementById('cardWidget');
-
                 if (!window.PaymentIntegration) {
                     alert('Платёжный модуль не загружен. Попробуйте обновить страницу.');
                     showScreen('review');
@@ -878,7 +877,6 @@
                     if (currentPaymentId !== orderId) return;
                     if (status === 'SUCCESS') {
                         window.sendOrderToBot();
-                        destroyAllIntegrations();
                         document.getElementById('paymentContainer').innerHTML =
                             '<div style="text-align:center; padding:40px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
                         sessionStorage.removeItem('pendingOrder');
@@ -886,7 +884,12 @@
                     } else if (status === 'REJECTED' || status === 'CANCELED') {
                         setTimeout(() => {
                             alert('❌ Оплата не прошла. Попробуйте снова.');
-                            destroyAllIntegrations();
+                            if (window.PaymentIntegration) {
+                                try { PaymentIntegration.destroy(); } catch(e) {}
+                            }
+                            document.getElementById('tpayWidget').innerHTML = '';
+                            document.getElementById('fastWidgets').innerHTML = '';
+                            document.getElementById('cardWidget').innerHTML = '';
                             showScreen('review');
                             sessionStorage.removeItem('pendingOrder');
                             localStorage.removeItem('pendingOrder');
@@ -894,61 +897,54 @@
                     }
                 };
 
-                // 1. Виджет T‑Pay (отдельно)
-                try {
-                    const tpayInstance = PaymentIntegration.create({
-                        terminalKey: terminalKey,
-                        product: 'eacq',
-                        features: {
-                            payment: {
-                                container: tpayContainer,
-                                widgetTypes: ['tpay'],
-                                paymentStartCallback: async () => paymentUrl,
-                                config: { status: { changedCallback: statusChanged } }
+                // Единая конфигурация со всеми тремя виджетами
+                const initConfig = {
+                    terminalKey: terminalKey,
+                    product: 'eacq',
+                    features: {
+                        payment: {
+                            // Контейнеры для быстрых кнопок (все в одном массиве)
+                            containers: [
+                                {
+                                    container: document.getElementById('tpayWidget'),
+                                    widgetTypes: ['tpay']
+                                },
+                                {
+                                    container: document.getElementById('fastWidgets'),
+                                    widgetTypes: ['sberpay', 'sbp']
+                                }
+                            ],
+                            paymentStartCallback: async () => paymentUrl,
+                            config: {
+                                status: {
+                                    changedCallback: statusChanged
+                                }
                             }
-                        }
-                    });
-                    activeIntegrations.push(tpayInstance);
-                    await tpayInstance.init();
-                } catch(e) { console.warn('TPay widget error', e); }
-
-                // 2. SberPay + СБП
-                try {
-                    const fastInstance = PaymentIntegration.create({
-                        terminalKey: terminalKey,
-                        product: 'eacq',
-                        features: {
-                            payment: {
-                                container: fastContainer,
-                                widgetTypes: ['sberpay', 'sbp'],
-                                paymentStartCallback: async () => paymentUrl,
-                                config: { status: { changedCallback: statusChanged } }
-                            }
-                        }
-                    });
-                    activeIntegrations.push(fastInstance);
-                    await fastInstance.init();
-                } catch(e) { console.warn('Fast widgets error', e); }
-
-                // 3. Оплата картой (iframe, без быстрых кнопок)
-                try {
-                    const cardInstance = PaymentIntegration.create({
-                        terminalKey: terminalKey,
-                        product: 'eacq',
-                        features: {
-                            iframe: {
-                                container: cardContainer,
-                                paymentStartCallback: async () => paymentUrl,
-                                config: {
-                                    status: { changedCallback: statusChanged },
-                                    features: { payment: false }
+                        },
+                        iframe: {
+                            container: document.getElementById('cardWidget'),
+                            paymentStartCallback: async () => paymentUrl,
+                            config: {
+                                status: {
+                                    changedCallback: statusChanged
+                                },
+                                features: {
+                                    payment: false  // Отключаем быстрые кнопки в iframe
                                 }
                             }
                         }
-                    });
-                    activeIntegrations.push(cardInstance);
-                    await cardInstance.init();
-                } catch(e) { console.warn('Card widget error', e); }
+                    }
+                };
+
+                try {
+                    await PaymentIntegration.init(initConfig);
+                } catch(err) {
+                    console.error('Payment init error:', err);
+                    alert('Ошибка запуска оплаты: ' + (err.message || 'неизвестная ошибка'));
+                    showScreen('review');
+                    sessionStorage.removeItem('pendingOrder');
+                    localStorage.removeItem('pendingOrder');
+                }
             }
 
             // ========== ЗАПУСК ==========
