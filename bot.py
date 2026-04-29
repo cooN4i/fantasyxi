@@ -186,8 +186,10 @@ def payment_notification():
         logger.warning("❌ No Token in notification")
         return "OK", 200
 
-    # Генерируем токен из тех же данных (исключая сам Token)
-    generated_token = generate_token(data, PASSWORD)
+    data_for_sign = {k: v for k, v in data.items() if k != "Token"}
+
+    # Генерируем токен именно из очищенных данных
+    generated_token = generate_token(data_for_sign, PASSWORD)
 
     # Временные логи для отладки (можно удалить после проверки)
     logger.info(f"Received token: {received_token}")
