@@ -43,7 +43,7 @@ logger = logging.getLogger("bot")
 app = Flask(__name__)
 CORS(app)
 
-# Хранилище ожидающих оплаты заказов (в продакшене лучше Redis)
+# Хранилище ожидающих оплаты заказов
 app.config['pending_orders'] = {}
 
 # ========== REQUESTS SESSION ==========
@@ -103,13 +103,13 @@ def init_payment():
     if not order_data:
         return jsonify({"error": "order_data is required"}), 400
 
-    # Генерируем уникальный номер заказа (число от 1 до 10000)
+    # Генерируем номер заказа (число от 1 до 10000)
     order_id = str(random.randint(1, 10000))
 
     # Сохраняем заказ на сервере
     app.config['pending_orders'][order_id] = order_data
 
-    # Формируем SuccessURL, который указывает на маршрут /payment-success
+    # SuccessURL автоматически указывает на /payment-success
     success_url = url_for(
         'payment_success', _external=True) + f'?order_id={order_id}'
 
@@ -135,10 +135,6 @@ def init_payment():
         },
         "SuccessURL": success_url
     }
-
-    # FailURL можно тоже добавить при желании
-    # fail_url = url_for('payment_fail', _external=True) + f'?order_id={order_id}'
-    # payload["FailURL"] = fail_url
 
     payload["Token"] = generate_token(payload, PASSWORD)
 
@@ -166,10 +162,10 @@ def payment_success():
     if not order:
         return "Заказ уже обработан или не найден", 404
 
-    # Отправляем сообщение клиенту
-    try:
-        chat_id = order['customer']['telegram_id']
-        if chat_id:
+    # ---------- Уведомление клиенту (как было раньше) ----------
+    chat_id = order['customer'].get('telegram_id')
+    if chat_id:
+        try:
             customer_text = (
                 f"{order['customer'].get('surname', '')} "
                 f"{order['customer'].get('name', '')} "
@@ -185,22 +181,42 @@ def payment_success():
                 f"👤 {customer_text}\n"
                 f"📞 {order['customer'].get('phone', '—')}\n"
                 f"📍 {order['customer'].get('address', '—')}\n\n"
-                f"{players_text}"
+                f"{players_text}\n\n"
+                f"📩 При возникновении вопросов напишите в поддержку.\n\n"
+                f"Спасибо за выбор Fantasy XI 🫶"
             )
             safe_send_message(chat_id, message)
-    except Exception as e:
-        logger.error(f"Failed to notify customer: {e}")
+        except Exception as e:
+            logger.error(f"Failed to notify customer: {e}")
 
-    # Отправляем уведомление администратору
-    try:
-        if ADMIN_CHAT_ID:
-            admin_msg = (
-                f"📦 <b>Оплачен заказ №{order_id}</b>\n\n"
-                f"<pre>{json.dumps(order, indent=2, ensure_ascii=False)}</pre>"
+    # ---------- Уведомление администратору (как было раньше) ----------
+    if ADMIN_CHAT_ID:
+        try:
+            tg_username = order['customer'].get('telegram')
+            tg_id = order['customer'].get('telegram_id')
+            customer_text = (
+                f"{order['customer'].get('surname', '')} "
+                f"{order['customer'].get('name', '')} "
+                f"{order['customer'].get('patronymic', '')}"
+            ).strip()
+            players_text = "\n".join(
+                [f"• {p.get('position')}: {p.get('name')}" for p in order.get(
+                    'players', [])]
             )
-            safe_send_message(ADMIN_CHAT_ID, admin_msg, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Failed to notify admin: {e}")
+            admin_message = (
+                f"📦 <b>Новый заказ №{order_id}</b>\n\n"
+                f"📅 {order.get('order_date', '')}\n"
+                f"⚽ {order.get('team', '—')}\n\n"
+                f"👤 {customer_text}\n"
+                f"📱 {tg_username or '—'}\n"
+                f"🆔 {tg_id or '—'}\n"
+                f"📞 {order['customer'].get('phone', '—')}\n"
+                f"📍 {order['customer'].get('address', '—')}\n\n"
+                f"{players_text}"
+            )
+            safe_send_message(ADMIN_CHAT_ID, admin_message, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Failed to notify admin: {e}")
 
     # Показываем пользователю страницу с подтверждением
     return render_template_string('''
