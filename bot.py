@@ -34,6 +34,7 @@ PASSWORD = os.getenv("TINKOFF_PASSWORD")
 TINKOFF_INIT_URL = os.getenv("TINKOFF_INIT_URL")
 
 DADATA_TOKEN = os.getenv("DADATA_API_KEY")
+BACKEND_URL = os.getenv("BACKEND_URL")
 
 # ========== LOGGING ==========
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +66,9 @@ session.mount("http://", adapter)
 # ========== TELEGRAM BOT ==========
 bot = telebot.TeleBot(TOKEN, threaded=False)
 telebot.apihelper.session = session
+
+# ========== ДОБАВЛЕНО: ХРАНЕНИЕ ЗАКАЗОВ ==========
+orders = {}
 
 # ========== HELPERS ==========
 
@@ -100,8 +104,11 @@ def init_payment():
     success_url = body.get("success_url")
     fail_url = body.get("fail_url")
 
-    # Генерируем случайный номер заказа (число от 1 до 10000)
-    order_id = str(random.randint(1, 10000))
+    # ДОБАВЛЕНО: данные заказа
+    order_data = body.get("order_data")
+
+    # Генерируем случайный номер заказа (число от 1 до 15000)
+    order_id = str(random.randint(1, 15000))
 
     AMOUNT = 1000  # копейки
 
@@ -110,6 +117,10 @@ def init_payment():
         "Amount": AMOUNT,
         "OrderId": order_id,
         "Description": "Football Dream Team",
+
+        # ДОБАВЛЕНО: webhook
+        "NotificationURL": f"{BACKEND_URL}/payment-notification",
+
         "Receipt": {
             "Phone": customer_phone,
             "Taxation": "usn_income",
@@ -135,6 +146,13 @@ def init_payment():
     try:
         resp = session.post(TINKOFF_INIT_URL, json=payload, timeout=5)
         data = resp.json()
+
+        # ДОБАВЛЕНО: сохраняем заказ
+        orders[order_id] = {
+            "status": "pending",
+            "data": order_data
+        }
+
         return jsonify({
             "PaymentURL": data.get("PaymentURL"),
             "order_id": order_id
@@ -142,6 +160,80 @@ def init_payment():
     except Exception as e:
         logger.error(f"❌ PAYMENT ERROR: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ========== ДОБАВЛЕНО: WEBHOOK ОПЛАТЫ ==========
+@app.route('/payment-notification', methods=['POST'])
+def payment_notification():
+    data = request.json
+    logger.info(f"💰 PAYMENT NOTIFICATION: {data}")
+
+    received_token = data.get("Token")
+
+    check_data = data.copy()
+    check_data.pop("Token", None)
+    generated_token = generate_token(check_data, PASSWORD)
+
+    if received_token != generated_token:
+        logger.warning("❌ INVALID TOKEN")
+        return jsonify({"status": "invalid token"}), 400
+
+    status = data.get("Status")
+    order_id = data.get("OrderId")
+
+    if not order_id or order_id not in orders:
+        return jsonify({"status": "order not found"}), 200
+
+    if status == "CONFIRMED":
+        order = orders[order_id]["data"]
+
+        if not order:
+            return jsonify({"status": "no order data"}), 200
+
+        customer = order.get("customer", {})
+        players = order.get("players", [])
+
+        customer_text = (
+            f"{customer.get('surname', '')} "
+            f"{customer.get('name', '')} "
+            f"{customer.get('patronymic', '')}"
+        ).strip()
+
+        players_text = "\n".join(
+            [f"• {p.get('position')}: {p.get('name')}" for p in players]
+        )
+
+        message_text = (
+            f"📦 <b>Новый заказ №{order_id}</b>\n\n"
+            f"📅 {order.get('order_date', '—')}\n"
+            f"⚽ {order.get('team', '—')}\n\n"
+            f"👤 {customer_text}\n"
+            f"📱 {customer.get('telegram') or '—'}\n"
+            f"🆔 {customer.get('telegram_id')}\n"
+            f"📞 {customer.get('phone', '—')}\n"
+            f"📍 {customer.get('address', '—')}\n\n"
+            f"{players_text}"
+        )
+
+        chat_id = customer.get("telegram_id")
+
+        # пользователю
+        if chat_id:
+            safe_send_message(
+                chat_id,
+                message_text,
+                parse_mode="HTML"
+            )
+
+        # админу
+        if ADMIN_CHAT_ID:
+            safe_send_message(
+                ADMIN_CHAT_ID,
+                message_text,
+                parse_mode="HTML"
+            )
+
+    return jsonify({"status": "ok"})
 
 
 @app.route('/get-dadata-token', methods=['GET'])
@@ -284,7 +376,7 @@ def webhook():
     else:
         gevent.spawn(process_unknown_message, message)
 
-    return jsonify({'ok': True})
+    return jsonify({'ok': True'})
 
 # ========== HEALTH ==========
 

@@ -368,12 +368,14 @@
     <script>
         (function() {
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
-
+            let orderAlreadySent = false;
             // ========== ВОЗВРАТ ПОСЛЕ ОПЛАТЫ ==========
             const urlParams = new URLSearchParams(window.location.search);
             const paymentStatus = urlParams.get('Success');
 
             if (paymentStatus === 'true') {
+                if (orderAlreadySent) return;
+                orderAlreadySent = true;
                 let savedOrder = sessionStorage.getItem('pendingOrder');
                 if (!savedOrder) savedOrder = localStorage.getItem('pendingOrder');
                 if (savedOrder) {
@@ -407,7 +409,7 @@
                 phone: '', address: '', order_id: null
             };
             const customerData = window.customerData;
-
+            
             const constructorScreen = document.getElementById('constructorScreen');
             const formScreen = document.getElementById('formScreen');
             const reviewScreen = document.getElementById('reviewScreen');
@@ -521,6 +523,9 @@
             }
 
             window.sendOrderToBot = function() {
+                if (orderAlreadySent) return;
+
+                orderAlreadySent = true;
                 if (!window.Telegram || !Telegram.WebApp) {
                     alert("❌ Telegram WebApp недоступен");
                     return;
@@ -789,32 +794,10 @@
                     return;
                 }
 
-                let paymentUrl, orderId;
-                try {
-                    const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            phone: customerData.phone,
-                            success_url: window.location.origin + window.location.pathname + '?Success=true',
-                            fail_url: window.location.origin + window.location.pathname + '?Success=false'
-                        })
-                    });
-                    const data = await resp.json();
-                    if (!data.PaymentURL || !data.order_id) throw new Error('Invalid response');
-                    paymentUrl = data.PaymentURL;
-                    orderId = data.order_id;
-                    customerData.order_id = orderId;
-                } catch(e) {
-                    console.error(e);
-                    alert('Ошибка создания платежа');
-                    showScreen('review');
-                    return;
-                }
-
                 const tgUser = getTelegramUser();
+
                 const pendingOrderObj = {
-                    order_id: orderId,
+                    order_id: null, // пока нет
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
                     customer: {
@@ -828,15 +811,52 @@
                     },
                     players: []
                 };
+
                 positionWrappers.forEach(wrapper => {
                     const posDiv = wrapper.querySelector('.position');
                     const labelDiv = wrapper.querySelector('.position-label');
                     const playerName = fieldPositions.get(posDiv);
-                    if (playerName) pendingOrderObj.players.push({
-                        position: labelDiv.textContent,
-                        name: playerName
-                    });
+                    if (playerName) {
+                        pendingOrderObj.players.push({
+                            position: labelDiv.textContent,
+                            name: playerName
+                        });
+                    }
                 });
+
+                let paymentUrl, orderId;
+
+                try {
+                    const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            phone: customerData.phone,
+                            success_url: window.location.origin + window.location.pathname + '?Success=true',
+                            fail_url: window.location.origin + window.location.pathname + '?Success=false',
+                            order_data: pendingOrderObj // ✅ теперь всё ок
+                        })
+                    });
+
+                    const data = await resp.json();
+
+                    if (!data.PaymentURL || !data.order_id) {
+                        throw new Error('Invalid response');
+                    }
+
+                    paymentUrl = data.PaymentURL;
+                    orderId = data.order_id;
+
+                    customerData.order_id = orderId;
+                    pendingOrderObj.order_id = orderId; // 👈 ДОБАВЬ ЭТО
+
+                } catch(e) {
+                    console.error(e);
+                    alert('Ошибка создания платежа');
+                    showScreen('review');
+                    return;
+                }
+
                 const orderStr = JSON.stringify(pendingOrderObj);
                 sessionStorage.setItem('pendingOrder', orderStr);
                 localStorage.setItem('pendingOrder', orderStr);
@@ -845,27 +865,34 @@
 
                 const statusChanged = (status) => {
                     if (currentPaymentId !== orderId) return;
+
                     if (status === 'SUCCESS') {
                         window.sendOrderToBot();
+
                         document.getElementById('paymentContainer').innerHTML =
                             '<div style="text-align:center; padding:40px;"><h3>✅ Оплата прошла успешно!</h3><p>Спасибо за заказ. Приложение закроется через несколько секунд...</p></div>';
+
                         sessionStorage.removeItem('pendingOrder');
                         localStorage.removeItem('pendingOrder');
+
                     } else if (status === 'REJECTED' || status === 'CANCELED') {
                         setTimeout(() => {
                             alert('❌ Оплата не прошла. Попробуйте снова.');
+
                             if (window.PaymentIntegration) {
                                 try { PaymentIntegration.destroy(); } catch(e) {}
                             }
+
                             document.getElementById('cardWidget').innerHTML = '';
                             showScreen('review');
+
                             sessionStorage.removeItem('pendingOrder');
                             localStorage.removeItem('pendingOrder');
+
                         }, 500);
                     }
                 };
 
-                // ТОЛЬКО IFRAME (все быстрые кнопки внутри)
                 const initConfig = {
                     terminalKey: terminalKey,
                     product: 'eacq',
@@ -886,8 +913,11 @@
                     await PaymentIntegration.init(initConfig);
                 } catch(err) {
                     console.error('Payment init error:', err);
+
                     alert('Ошибка запуска оплаты: ' + (err.message || 'неизвестная ошибка'));
+
                     showScreen('review');
+
                     sessionStorage.removeItem('pendingOrder');
                     localStorage.removeItem('pendingOrder');
                 }
