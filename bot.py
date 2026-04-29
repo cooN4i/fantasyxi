@@ -207,6 +207,8 @@ def payment_notification():
             return "OK", 200
 
         customer = order.get("customer", {})
+        logger.info(f"Customer data: {customer}")
+        logger.info(f"Customer telegram_id: {customer.get('telegram_id')}")
         players = order.get("players", [])
 
         customer_text = (
