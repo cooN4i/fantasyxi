@@ -85,13 +85,16 @@ def safe_send_message(chat_id, text, **kwargs):
 def generate_token(data: dict, password: str) -> str:
     """
     Генерация токена (подписи) по документации Т-Банка.
-    https://developer.tbank.ru/eacq/intro/developer/token
+    Учитывает, что булевы JSON-значения приводятся к "true"/"false".
     """
     pairs = {}
     for key, value in data.items():
         if isinstance(value, (dict, list)):
             continue
-        pairs[key] = str(value)
+        if isinstance(value, bool):
+            pairs[key] = "true" if value else "false"
+        else:
+            pairs[key] = str(value)
 
     pairs["Password"] = password
 
@@ -176,12 +179,10 @@ def payment_notification():
         logger.warning("❌ No Token in notification")
         return "OK", 200
 
+    # Исключаем Token из данных для подписи
     sign_data = {k: v for k, v in data.items() if k != "Token"}
-
-    # Генерируем токен из очищенных данных
     generated_token = generate_token(sign_data, PASSWORD)
 
-    # Логи для диагностики (можно удалить после проверки)
     logger.info(f"Received token: {received_token}")
     logger.info(f"Generated token: {generated_token}")
     logger.info(f"Sign data: {sign_data}")
@@ -347,7 +348,7 @@ def process_start(message):
         safe_send_message(
             chat_id,
             "👋 Привет!\n\n"
-            "Добро пожаловать в Fantasy XI - бот для создания футбольных составов.\n\n"
+            "Добро пожаловать в Fantasy Constructor - бот для создания футбольных составов.\n\n"
             "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду.",
             reply_markup=markup
         )
