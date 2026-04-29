@@ -242,7 +242,7 @@
         }
         .screen.active { display: block; }
         #constructorScreen { padding-bottom: 120px; }
-        
+
         /* Платёжный контейнер */
         #paymentContainer {
             width: 100%;
@@ -253,17 +253,10 @@
             padding: 24px 20px;
             display: flex;
             flex-direction: column;
-            gap: 28px;
+            gap: 20px;
         }
-        #tpayWidget {
-            display: flex;
-            justify-content: center;
-        }
-        #fastWidgets {
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-            flex-wrap: wrap;
+        #quickPayments {
+            /* блок быстрых кнопок */
         }
         #cardWidget {
             min-height: 350px;
@@ -275,7 +268,7 @@
             min-height: 350px;
             background: white;
         }
-        
+
         body, html {
             height: 100%;
             overflow: hidden;
@@ -295,15 +288,9 @@
             caret-color: #007bff !important;
             -webkit-text-fill-color: #000000;
         }
-        .form-group input {
-            caret-color: #007bff;
-        }
-        .iti input, .iti input:focus {
-            caret-color: #007bff !important;
-        }
-        #address, #address:focus {
-            caret-color: #007bff !important;
-        }
+        .form-group input { caret-color: #007bff; }
+        .iti input, .iti input:focus { caret-color: #007bff !important; }
+        #address, #address:focus { caret-color: #007bff !important; }
     </style>
 </head>
 <body>
@@ -377,8 +364,7 @@
             <button class="back-button" id="backToReviewFromPayment">← Назад к заказу</button>
             <h2>Оплата заказа</h2>
             <div id="paymentContainer">
-                <div id="tpayWidget"></div>
-                <div id="fastWidgets"></div>
+                <div id="quickPayments"></div>
                 <div id="cardWidget"></div>
             </div>
         </div>
@@ -767,7 +753,7 @@
                 updateOrderButtonVisibility();
             }
 
-            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ (ИСПРАВЛЕНО) ==========
+            // ========== ПЛАТЁЖНАЯ ИНТЕГРАЦИЯ ==========
             let terminalKey = null;
             let currentPaymentId = null;
 
@@ -781,14 +767,11 @@
                 }
                 terminalKey = backendConfig?.terminalKey || '1775395377330DEMO';
 
-                // Жёсткое уничтожение предыдущей интеграции
+                // Уничтожаем предыдущую интеграцию и очищаем контейнеры
                 if (window.PaymentIntegration) {
                     try { PaymentIntegration.destroy(); } catch(e) {}
                 }
-                
-                // Очистка контейнеров
-                document.getElementById('tpayWidget').innerHTML = '';
-                document.getElementById('fastWidgets').innerHTML = '';
+                document.getElementById('quickPayments').innerHTML = '';
                 document.getElementById('cardWidget').innerHTML = '';
                 currentPaymentId = null;
 
@@ -802,8 +785,7 @@
                 if (window.PaymentIntegration) {
                     try { PaymentIntegration.destroy(); } catch(e) {}
                 }
-                document.getElementById('tpayWidget').innerHTML = '';
-                document.getElementById('fastWidgets').innerHTML = '';
+                document.getElementById('quickPayments').innerHTML = '';
                 document.getElementById('cardWidget').innerHTML = '';
                 currentPaymentId = null;
                 showScreen('review');
@@ -872,7 +854,7 @@
 
                 currentPaymentId = orderId;
 
-                // Общий обработчик статуса
+                // Обработчик статуса
                 const statusChanged = (status) => {
                     if (currentPaymentId !== orderId) return;
                     if (status === 'SUCCESS') {
@@ -887,8 +869,7 @@
                             if (window.PaymentIntegration) {
                                 try { PaymentIntegration.destroy(); } catch(e) {}
                             }
-                            document.getElementById('tpayWidget').innerHTML = '';
-                            document.getElementById('fastWidgets').innerHTML = '';
+                            document.getElementById('quickPayments').innerHTML = '';
                             document.getElementById('cardWidget').innerHTML = '';
                             showScreen('review');
                             sessionStorage.removeItem('pendingOrder');
@@ -897,23 +878,14 @@
                     }
                 };
 
-                // Единая конфигурация со всеми тремя виджетами
+                // Единая конфигурация
                 const initConfig = {
                     terminalKey: terminalKey,
                     product: 'eacq',
                     features: {
                         payment: {
-                            // Контейнеры для быстрых кнопок (все в одном массиве)
-                            containers: [
-                                {
-                                    container: document.getElementById('tpayWidget'),
-                                    widgetTypes: ['tpay']
-                                },
-                                {
-                                    container: document.getElementById('fastWidgets'),
-                                    widgetTypes: ['sberpay', 'sbp']
-                                }
-                            ],
+                            container: document.getElementById('quickPayments'),
+                            widgetTypes: ['tpay', 'sbp', 'sberpay'],
                             paymentStartCallback: async () => paymentUrl,
                             config: {
                                 status: {
@@ -929,7 +901,7 @@
                                     changedCallback: statusChanged
                                 },
                                 features: {
-                                    payment: false  // Отключаем быстрые кнопки в iframe
+                                    payment: false
                                 }
                             }
                         }

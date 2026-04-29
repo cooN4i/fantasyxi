@@ -3,7 +3,7 @@ import os
 import json
 import logging
 import hashlib
-import uuid
+import random
 import requests
 
 from flask import Flask, request, jsonify
@@ -88,7 +88,7 @@ def generate_token(data: dict, password: str):
     concat = "".join(str(v) for k, v in sorted_items)
     return hashlib.sha256(concat.encode()).hexdigest()
 
-# ========== PAYMENT (НОВЫЙ ПОРЯДОК) ==========
+# ========== PAYMENT ==========
 
 
 @app.route('/init-payment', methods=['POST'])
@@ -100,8 +100,8 @@ def init_payment():
     success_url = body.get("success_url")
     fail_url = body.get("fail_url")
 
-    # Уникальный ID заказа генерирует бэкенд
-    order_id = str(uuid.uuid4().hex[:10])  # короткий уникальный ID
+    # Генерируем случайный номер заказа (число от 1 до 10000)
+    order_id = str(random.randint(1, 10000))
 
     AMOUNT = 100  # копейки
 
