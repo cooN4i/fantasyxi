@@ -68,7 +68,25 @@
     </div>
 
     <script>
-        // Проверка платформы сразу при открытии
+        // Проверяем, открыто ли в Mini App
+        const urlParams = new URLSearchParams(window.location.search);
+        const hasTgData = urlParams.get('tgWebAppData') || 
+                        (window.Telegram?.WebApp?.initData?.length > 0);
+
+        if (!hasTgData) {
+            // Не Mini App — показываем заглушку
+            document.body.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:20px;">
+                    <div style="background:white;padding:32px;border-radius:20px;max-width:320px;width:90%;">
+                        <h2>⚽ Fantasy XI</h2>
+                        <p>Пожалуйста, откройте сервис через Telegram-бота <strong>@fantasyxi_bot</strong></p>
+                    </div>
+                </div>`;
+            // Останавливаем выполнение
+            throw new Error('Not Mini App');
+        }
+
+        // Дальше только для Mini App
         if (window.Telegram && Telegram.WebApp) {
             Telegram.WebApp.ready();
             Telegram.WebApp.expand();
@@ -84,9 +102,12 @@
         cards.forEach(card => {
             card.addEventListener('click', () => {
                 const team = card.dataset.team;
-                window.location.href = `constructor.html?team=${encodeURIComponent(team)}`;
+                // Прокидываем tgWebAppData на следующую страницу
+                const currentParams = window.location.search;
+                window.location.href = `constructor.html${currentParams}&team=${encodeURIComponent(team)}`;
             });
         });
+
         document.addEventListener('gesturestart', function (e) {
             e.preventDefault();
         });
