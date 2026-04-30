@@ -154,9 +154,11 @@ def init_payment():
 
         orders[order_id] = {
             "status": "pending",
-            "data": order_data
+            "data": order_data,
+            "telegram_id": order_data.get("customer", {}).get("telegram_id"),
+            "username": order_data.get("customer", {}).get("telegram")
         }
-
+        logger.info(f"Saved telegram_id: {orders[order_id]['telegram_id']}")
         return jsonify({
             "PaymentURL": data.get("PaymentURL"),
             "order_id": order_id
@@ -234,7 +236,7 @@ def payment_notification():
             f"{players_text}"
         )
 
-        chat_id = customer.get("telegram_id")
+        chat_id = orders[order_id].get("telegram_id")
 
         if chat_id:
             safe_send_message(
@@ -249,6 +251,8 @@ def payment_notification():
                 message_text,
                 parse_mode="HTML"
             )
+        # удаляем заказ после обработки
+        orders.pop(order_id, None)
 
     return "OK", 200
 
