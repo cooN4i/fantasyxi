@@ -366,27 +366,6 @@
         (function() {
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
 
-            // ========== ГАРАНТИРУЕМ ID ПОЛЬЗОВАТЕЛЯ ==========
-            let storedTelegramId = null;
-            let storedTelegramUsername = null;
-
-            try {
-                const unsafe = Telegram.WebApp?.initDataUnsafe;
-                if (unsafe?.user) {
-                    storedTelegramId = unsafe.user.id;
-                    storedTelegramUsername = unsafe.user.username || null;
-                }
-            } catch (e) {}
-
-            if (storedTelegramId) {
-                sessionStorage.setItem('tg_id', storedTelegramId);
-                if (storedTelegramUsername) sessionStorage.setItem('tg_username', storedTelegramUsername);
-            } else {
-                // Пробуем восстановить из sessionStorage
-                storedTelegramId = sessionStorage.getItem('tg_id') || null;
-                storedTelegramUsername = sessionStorage.getItem('tg_username') || null;
-            }
-
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
             let backendConfig = null;
             let playersData = [];
@@ -399,7 +378,7 @@
                 phone: '', address: '', order_id: null
             };
             const customerData = window.customerData;
-            
+
             const constructorScreen = document.getElementById('constructorScreen');
             const formScreen = document.getElementById('formScreen');
             const reviewScreen = document.getElementById('reviewScreen');
@@ -505,63 +484,6 @@
                 document.getElementById('addressError').classList.toggle('visible', !ok);
                 return ok;
             }
-
-            function getTelegramUser() {
-                // Пробуем взять из init_data
-                let user = null;
-                if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
-                    user = Telegram.WebApp.initDataUnsafe.user;
-                }
-                // Fallback: сохранённые значения в sessionStorage
-                if (!user || !user.id) {
-                    const storedId = sessionStorage.getItem('tg_id');
-                    const storedUsername = sessionStorage.getItem('tg_username');
-                    if (storedId) {
-                        user = {
-                            id: Number(storedId),
-                            username: storedUsername || null
-                        };
-                    }
-                }
-                return user || null;
-            }
-
-            // Эта функция больше не вызывается из платёжного потока
-            window.sendOrderToBot = function() {
-                if (!window.Telegram || !Telegram.WebApp) {
-                    alert("❌ Telegram WebApp недоступен");
-                    return;
-                }
-                const tgUser = getTelegramUser();
-                const composition = {
-                    order_id: customerData.order_id,
-                    team: team,
-                    order_date: new Date().toLocaleString('ru-RU'),
-                    customer: {
-                        surname: customerData.surname,
-                        name: customerData.name,
-                        patronymic: customerData.patronymic,
-                        phone: customerData.phone,
-                        address: customerData.address,
-                        telegram: tgUser?.username ? '@' + tgUser.username : null,
-                        telegram_id: tgUser?.id || null
-                    },
-                    players: []
-                };
-                positionWrappers.forEach(wrapper => {
-                    const posDiv = wrapper.querySelector('.position');
-                    const labelDiv = wrapper.querySelector('.position-label');
-                    const playerName = fieldPositions.get(posDiv);
-                    if (playerName) composition.players.push({
-                        position: labelDiv.textContent,
-                        name: playerName
-                    });
-                });
-                try {
-                    Telegram.WebApp.sendData(JSON.stringify(composition));
-                    setTimeout(() => Telegram.WebApp.close(), 2000);
-                } catch(e) { alert('Ошибка отправки: ' + e.message); }
-            };
 
             function showReviewScreen() {
                 const reviewContent = document.getElementById('reviewContent');
@@ -754,28 +676,16 @@
                 updateOrderButtonVisibility();
             }
 
-            // ========== НОВАЯ ПЛАТЁЖНАЯ ЛОГИКА (БЕЗ ЗАДЕРЖКИ) ==========
+            // ========== НОВАЯ ПЛАТЁЖНАЯ ЛОГИКА ==========
             document.getElementById('payButton').addEventListener('click', async () => {
                 if (paymentInProgress) return;
                 paymentInProgress = true;
 
-                const tgUser = getTelegramUser();
-                if (!tgUser || !tgUser.id) {
-                    showScreen('payment');
-                    document.getElementById('paymentContainer').innerHTML = `
-                        <div style="text-align:center; padding:30px;">
-                            <h3>⚠️ Не удалось идентифицировать пользователя Telegram</h3>
-                            <p>Пожалуйста, откройте конструктор снова через бота @FantasyXIBot</p>
-                            <button class="action-button secondary-button" id="backFromError">← Назад к заказу</button>
-                        </div>`;
-                    document.getElementById('backFromError').addEventListener('click', () => {
-                        showScreen('review');
-                    });
-                    paymentInProgress = false;
-                    return;
-                }
+                // Генерируем уникальный идентификатор запроса (request_id)
+                const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2);
 
-                const pendingOrderObj = {
+                // Формируем полный объект заказа (без telegram данных)
+                const composition = {
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
                     customer: {
@@ -783,9 +693,7 @@
                         name: customerData.name,
                         patronymic: customerData.patronymic,
                         phone: customerData.phone,
-                        address: customerData.address,
-                        telegram: tgUser.username ? '@' + tgUser.username : null,
-                        telegram_id: tgUser.id
+                        address: customerData.address
                     },
                     players: []
                 };
@@ -794,29 +702,41 @@
                     const labelDiv = wrapper.querySelector('.position-label');
                     const playerName = fieldPositions.get(posDiv);
                     if (playerName) {
-                        pendingOrderObj.players.push({
+                        composition.players.push({
                             position: labelDiv.textContent,
                             name: playerName
                         });
                     }
                 });
 
+                // Шаг 1: отправляем боту только request_id для получения Telegram-идентификатора
+                try {
+                    Telegram.WebApp.sendData(JSON.stringify({ request_id: requestId }));
+                } catch (e) {
+                    alert('Ошибка связи с ботом');
+                    paymentInProgress = false;
+                    return;
+                }
+
+                // Шаг 2: сразу инициируем платёж, передавая тот же request_id
                 try {
                     const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             phone: customerData.phone,
-                            order_data: pendingOrderObj
+                            request_id: requestId,
+                            order_data: composition
                         })
                     });
                     const data = await resp.json();
                     if (!data.PaymentURL || !data.order_id) throw new Error('Invalid response');
 
-                    pendingOrderObj.order_id = data.order_id;
-                    sessionStorage.setItem('pendingOrder', JSON.stringify(pendingOrderObj));
+                    // Сохраняем order_id в заказе (для истории, если нужно)
+                    composition.order_id = data.order_id;
+                    sessionStorage.setItem('pendingOrder', JSON.stringify(composition));
 
-                    // Сразу открываем платёжную ссылку и показываем финальный экран
+                    // Открываем платёжную ссылку
                     if (window.Telegram && Telegram.WebApp) {
                         Telegram.WebApp.openLink(data.PaymentURL, { try_instant_view: false });
                     } else {

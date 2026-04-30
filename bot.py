@@ -69,6 +69,7 @@ telebot.apihelper.session = session
 
 # ========== ХРАНЕНИЕ ЗАКАЗОВ ==========
 orders = {}
+pending_requests = {}  # request_id -> {"chat_id": ..., "username": ...}
 
 # ========== HELPERS ==========
 
@@ -115,8 +116,11 @@ def init_payment():
     success_url = body.get("success_url")
     fail_url = body.get("fail_url")
     order_data = body.get("order_data")
+    request_id = body.get("request_id")  # новый параметр
+
     logger.info(f"Order data received: {order_data}")
-    logger.info(f"Customer ID: {order_data.get('customer', {}).get('telegram_id')}")
+    logger.info(f"Request ID: {request_id}")
+
     order_id = str(random.randint(1, 15000))
     AMOUNT = 1000  # копейки
 
@@ -155,10 +159,9 @@ def init_payment():
         orders[order_id] = {
             "status": "pending",
             "data": order_data,
-            "telegram_id": order_data.get("customer", {}).get("telegram_id"),
-            "username": order_data.get("customer", {}).get("telegram")
+            "request_id": request_id   # сохраняем для последующей привязки
         }
-        logger.info(f"Saved telegram_id: {orders[order_id]['telegram_id']}")
+        logger.info(f"Order {order_id} created with request_id {request_id}")
         return jsonify({
             "PaymentURL": data.get("PaymentURL"),
             "order_id": order_id
@@ -188,7 +191,6 @@ def payment_notification():
 
     logger.info(f"Received token: {received_token}")
     logger.info(f"Generated token: {generated_token}")
-    logger.info(f"Sign data: {sign_data}")
 
     if received_token != generated_token:
         logger.warning("❌ INVALID TOKEN")
@@ -203,15 +205,24 @@ def payment_notification():
         return "OK", 200
 
     if status == "CONFIRMED":
-        order = orders[order_id]["data"]
+        order_info = orders[order_id]
+        order = order_info["data"]
+        request_id = order_info.get("request_id")
 
-        if not order:
-            logger.warning("Order data is empty")
-            return "OK", 200
+        # Получаем реальные Telegram-данные из временного хранилища
+        tg_info = pending_requests.pop(
+            request_id, None) if request_id else None
+        if tg_info:
+            telegram_id = tg_info["chat_id"]
+            tg_username = "@" + \
+                tg_info["username"] if tg_info["username"] else None
+        else:
+            # Запасной вариант (на случай, если данные не были получены)
+            customer = order.get("customer", {})
+            telegram_id = customer.get("telegram_id")
+            tg_username = customer.get("telegram")
 
         customer = order.get("customer", {})
-        logger.info(f"Customer data: {customer}")
-        logger.info(f"Customer telegram_id: {customer.get('telegram_id')}")
         players = order.get("players", [])
 
         customer_text = (
@@ -229,29 +240,22 @@ def payment_notification():
             f"📅 {order.get('order_date', '—')}\n"
             f"⚽ {order.get('team', '—')}\n\n"
             f"👤 {customer_text}\n"
-            f"📱 {customer.get('telegram') or '—'}\n"
-            f"🆔 {customer.get('telegram_id')}\n"
+            f"📱 {tg_username or '—'}\n"
+            f"🆔 {telegram_id or '—'}\n"
             f"📞 {customer.get('phone', '—')}\n"
             f"📍 {customer.get('address', '—')}\n\n"
             f"{players_text}"
         )
 
-        chat_id = orders[order_id].get("telegram_id")
+        # Отправляем пользователю
+        if telegram_id:
+            safe_send_message(telegram_id, message_text, parse_mode="HTML")
 
-        if chat_id:
-            safe_send_message(
-                chat_id,
-                message_text,
-                parse_mode="HTML"
-            )
-
+        # Отправляем админу
         if ADMIN_CHAT_ID:
-            safe_send_message(
-                ADMIN_CHAT_ID,
-                message_text,
-                parse_mode="HTML"
-            )
-        # удаляем заказ после обработки
+            safe_send_message(ADMIN_CHAT_ID, message_text, parse_mode="HTML")
+
+        # Удаляем заказ
         orders.pop(order_id, None)
 
     return "OK", 200
@@ -278,6 +282,20 @@ def process_webapp_data(message):
         chat_id = message['chat']['id']
         data = json.loads(message['web_app_data']['data'])
 
+        # Новый сценарий: получен только request_id для идентификации
+        if "request_id" in data and "team" not in data:
+            request_id = data["request_id"]
+            from_user = message.get('from', {})
+            pending_requests[request_id] = {
+                "chat_id": chat_id,
+                "username": from_user.get("username")
+            }
+            logger.info(
+                f"📌 Saved Telegram identity for request {request_id}: {pending_requests[request_id]}")
+            # Пользователю ничего не отвечаем, чтобы не сбивать с толку
+            return
+
+        # Обычная полная отправка заказа (на случай, если кто-то решит использовать старый способ)
         order_id = data.get("order_id", "—")
         order_date = data.get("order_date", "—")
         team = data.get("team", "—")
