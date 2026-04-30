@@ -369,15 +369,33 @@
         <div id="notTelegramScreen" class="screen">
             <div style="background: white; padding: 32px; border-radius: 20px; max-width: 320px; width: 90%;">
                 <h2>⚽ Fantasy XI</h2>
-                <p>Пожалуйста, откройте сервис через Telegram-бота <strong>@fantasyxi_bot</strong></p>
+                <p>Пожалуйста, откройте сервис через Telegram-бота <strong>@fantasyxi_bot</strong> в мобильном или десктопном приложении.</p>
             </div>
         </div>
     </div>
 
     <script>
         (function() {
+            // Проверка по хешу: разрешены только десктоп и мобильный Telegram
+            const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+            const platform = hashParams.get('tgWebAppPlatform');
+            const isMiniApp = platform && platform !== 'weba';
 
-            
+            if (!isMiniApp) {
+                document.getElementById('app').innerHTML = `
+                    <div id="notTelegramScreen" class="screen active" style="display:flex;align-items:center;justify-content:center;text-align:center;">
+                        <div style="background:white;padding:32px;border-radius:20px;max-width:320px;width:90%;">
+                            <h2>⚽ Fantasy XI</h2>
+                            <p>Пожалуйста, откройте сервис через Telegram-бота <strong>@fantasyxi_bot</strong> в мобильном или десктопном приложении.</p>
+                        </div>
+                    </div>`;
+                return;
+            }
+
+            // Только для Mini App
+            if (window.Telegram?.WebApp) {
+                Telegram.WebApp.ready();
+            }
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
             let backendConfig = null;
@@ -404,10 +422,6 @@
             const closeSelector = document.getElementById('closeSelector');
             const orderButton = document.getElementById('orderButton');
 
-
-            
-
-            
             // ========== ПОКАЗ ЭКРАНОВ ==========
             function showScreen(screenName) {
                 constructorScreen.classList.remove('active');
@@ -702,7 +716,6 @@
                 if (paymentInProgress) return;
                 paymentInProgress = true;
 
-                // Формируем полный объект заказа (без telegram данных)
                 const composition = {
                     team: team,
                     order_date: new Date().toLocaleString('ru-RU'),
@@ -727,7 +740,6 @@
                     }
                 });
 
-                // Шаг 1: инициируем платёж и получаем PaymentURL и order_id
                 try {
                     const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
                         method: 'POST',
@@ -743,15 +755,12 @@
                     const paymentURL = data.PaymentURL;
                     const orderId = data.order_id;
 
-                    // Шаг 2: открываем платёжную ссылку (WebApp остаётся открыт)
                     if (window.Telegram && Telegram.WebApp) {
                         Telegram.WebApp.openLink(paymentURL, { try_instant_view: false });
                     } else {
                         window.open(paymentURL, '_blank');
                     }
 
-                    // Шаг 3: отправляем боту order_id для получения Telegram ID/username
-                    // Этот вызов закроет Mini App, но платёжная страница уже открыта
                     if (window.Telegram && Telegram.WebApp) {
                         Telegram.WebApp.sendData(JSON.stringify({ order_id: orderId }));
                     } else {
@@ -760,8 +769,6 @@
                         return;
                     }
 
-                    // Показываем экран оплаты (скорее всего не увидим, так как sendData закроет приложение,
-                    // но оставим для совместимости)
                     showScreen('payment');
                     document.getElementById('paymentContainer').innerHTML = `
                         <div style="text-align:center; padding:30px;">
@@ -782,7 +789,6 @@
                 }
             });
 
-            // Кнопка «Назад» на экране оплаты возвращает на проверку заказа
             document.getElementById('backToReviewFromPayment').addEventListener('click', () => {
                 showScreen('review');
             });
