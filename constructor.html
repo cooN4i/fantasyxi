@@ -284,6 +284,12 @@
         .form-group input { caret-color: #007bff; }
         .iti input, .iti input:focus { caret-color: #007bff !important; }
         #address, #address:focus { caret-color: #007bff !important; }
+        #notTelegramScreen.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -360,10 +366,17 @@
                 <div id="cardWidget"></div>
             </div>
         </div>
+        <div id="notTelegramScreen" class="screen">
+            <div style="background: white; padding: 32px; border-radius: 20px; max-width: 320px; width: 90%;">
+                <h2>⚽ Fantasy XI</h2>
+                <p>Пожалуйста, откройте сервис через Telegram-бота <strong>@fantasyxi_bot</strong></p>
+            </div>
+        </div>
     </div>
 
     <script>
         (function() {
+            const isTelegramMiniApp = !!(window.Telegram?.WebApp?.initDataUnsafe?.user?.id);
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
@@ -397,6 +410,7 @@
                 formScreen.classList.remove('active');
                 reviewScreen.classList.remove('active');
                 paymentScreen.classList.remove('active');
+                document.getElementById('notTelegramScreen')?.classList.remove('active');
                 if (screenName === 'constructor') constructorScreen.classList.add('active');
                 else if (screenName === 'form') {
                     initDaData();
@@ -417,6 +431,9 @@
                     }
                 } else if (screenName === 'review') reviewScreen.classList.add('active');
                 else if (screenName === 'payment') paymentScreen.classList.add('active');
+                else if (screenName === 'notTelegram') {
+                    document.getElementById('notTelegramScreen').classList.add('active');
+                }
             }
 
             function isTeamComplete() { return fieldPositions.size === 11; }
@@ -769,6 +786,11 @@
             // ========== ЗАПУСК ==========
             (async function main() {
                 await loadConfig();
+                if (!isTelegramMiniApp) {
+                    // Обычный браузер – показываем только заглушку
+                    showScreen('notTelegram');
+                    return; // ничего больше не делаем
+                }
                 await loadTeamData();
             })();
         })();
