@@ -376,13 +376,13 @@
 
     <script>
         (function() {
-            const tg = window.Telegram?.WebApp;
+            // const tg = window.Telegram?.WebApp;
 
-            const isTelegramMiniApp = !!(
-                tg &&
-                tg.initData &&
-                tg.initData.length > 0
-            );
+            // const isTelegramMiniApp = !!(
+            //     tg &&
+            //     tg.initData &&
+            //     tg.initData.length > 0
+            // );
             
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
@@ -409,6 +409,18 @@
             const selectorTitle = document.getElementById('selectorTitle');
             const closeSelector = document.getElementById('closeSelector');
             const orderButton = document.getElementById('orderButton');
+            function isTelegram() {
+                const tg = window.Telegram?.WebApp;
+
+                return !!(
+                    tg &&
+                    tg.initData &&
+                    tg.initDataUnsafe &&
+                    tg.initDataUnsafe.user
+                );
+            }
+
+            const isTelegramMiniApp = isTelegram();
 
             // ========== ПОКАЗ ЭКРАНОВ ==========
             function showScreen(screenName) {
@@ -791,13 +803,30 @@
 
             // ========== ЗАПУСК ==========
             (async function main() {
-                if (!isTelegramMiniApp) {
-                    // Обычный браузер – показываем только заглушку
+
+                const waitForTelegram = () =>
+                    new Promise(resolve => {
+                        const check = () => {
+                            if (window.Telegram?.WebApp) return resolve();
+                            setTimeout(check, 50);
+                        };
+                        check();
+                    });
+
+                await waitForTelegram();
+
+                const tg = window.Telegram.WebApp;
+
+                if (!tg || !tg.initData) {
                     showScreen('notTelegram');
-                    return; // ничего больше не делаем
+                    return;
                 }
+
+                tg.ready();
+
                 await loadConfig();
                 await loadTeamData();
+
             })();
         })();
     </script>
