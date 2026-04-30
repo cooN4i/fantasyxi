@@ -4,7 +4,7 @@ import json
 import logging
 import hashlib
 import random
-import requests
+import redis
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -35,6 +35,7 @@ TINKOFF_INIT_URL = os.getenv("TINKOFF_INIT_URL")
 
 DADATA_TOKEN = os.getenv("DADATA_API_KEY")
 BACKEND_URL = os.getenv("BACKEND_URL")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # ========== LOGGING ==========
 logging.basicConfig(level=logging.INFO)
@@ -44,22 +45,14 @@ logger = logging.getLogger("bot")
 app = Flask(__name__)
 CORS(app)
 
+# ========== REDIS ==========
+r = redis.from_url(REDIS_URL)
+
 # ========== REQUESTS SESSION ==========
 session = requests.Session()
-
-retry = Retry(
-    total=3,
-    backoff_factor=0.3,
-    status_forcelist=[500, 502, 503, 504],
-    allowed_methods=["POST", "GET"]
-)
-
-adapter = HTTPAdapter(
-    max_retries=retry,
-    pool_connections=20,
-    pool_maxsize=20
-)
-
+retry = Retry(total=3, backoff_factor=0.3,
+              status_forcelist=[500, 502, 503, 504])
+adapter = HTTPAdapter(max_retries=retry, pool_connections=20, pool_maxsize=20)
 session.mount("https://", adapter)
 session.mount("http://", adapter)
 
@@ -67,15 +60,10 @@ session.mount("http://", adapter)
 bot = telebot.TeleBot(TOKEN, threaded=False)
 telebot.apihelper.session = session
 
-# ========== ХРАНЕНИЕ ЗАКАЗОВ ==========
-orders = {}
-pending_requests = {}  # order_id -> {"chat_id": ..., "username": ...}
-
 # ========== HELPERS ==========
 
 
 def safe_send_message(chat_id, text, **kwargs):
-    """Безопасная отправка сообщения с игнорированием ошибок."""
     try:
         return bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
@@ -84,10 +72,6 @@ def safe_send_message(chat_id, text, **kwargs):
 
 
 def generate_token(data: dict, password: str) -> str:
-    """
-    Генерация токена (подписи) по документации Т-Банка.
-    Учитывает, что булевы JSON-значения приводятся к "true"/"false".
-    """
     pairs = {}
     for key, value in data.items():
         if isinstance(value, (dict, list)):
@@ -96,21 +80,17 @@ def generate_token(data: dict, password: str) -> str:
             pairs[key] = "true" if value else "false"
         else:
             pairs[key] = str(value)
-
     pairs["Password"] = password
-
     sorted_keys = sorted(pairs.keys())
     concat = "".join(pairs[k] for k in sorted_keys)
-
     return hashlib.sha256(concat.encode("utf-8")).hexdigest()
 
-
 # ========== PAYMENT ==========
+
 
 @app.route('/init-payment', methods=['POST'])
 def init_payment():
     logger.info("💳 INIT PAYMENT")
-
     body = request.json
     customer_phone = body.get("phone") or "79999999999"
     success_url = body.get("success_url")
@@ -120,7 +100,7 @@ def init_payment():
     logger.info(f"Order data received: {order_data}")
 
     order_id = str(random.randint(1, 15000))
-    AMOUNT = 1000  # копейки
+    AMOUNT = 1000
 
     payload = {
         "TerminalKey": TERMINAL_KEY,
@@ -131,18 +111,15 @@ def init_payment():
         "Receipt": {
             "Phone": customer_phone,
             "Taxation": "usn_income",
-            "Items": [
-                {
-                    "Name": "Футбольный состав",
-                    "Price": AMOUNT,
-                    "Quantity": 1,
-                    "Amount": AMOUNT,
-                    "Tax": "none"
-                }
-            ]
+            "Items": [{
+                "Name": "Футбольный состав",
+                "Price": AMOUNT,
+                "Quantity": 1,
+                "Amount": AMOUNT,
+                "Tax": "none"
+            }]
         }
     }
-
     if success_url:
         payload["SuccessURL"] = success_url
     if fail_url:
@@ -154,11 +131,12 @@ def init_payment():
         resp = session.post(TINKOFF_INIT_URL, json=payload, timeout=5)
         data = resp.json()
 
-        orders[order_id] = {
+        # Сохраняем заказ в Redis (на 30 минут)
+        r.setex(f"order:{order_id}", 1800, json.dumps({
             "status": "pending",
             "data": order_data
-        }
-        logger.info(f"Order {order_id} created")
+        }))
+        logger.info(f"Order {order_id} created in Redis")
         return jsonify({
             "PaymentURL": data.get("PaymentURL"),
             "order_id": order_id
@@ -168,12 +146,10 @@ def init_payment():
         return jsonify({"error": str(e)}), 500
 
 
-# ========== WEBHOOK ОПЛАТЫ ==========
 @app.route('/payment-notification', methods=['POST'])
 def payment_notification():
     data = request.json
     logger.info(f"💰 PAYMENT NOTIFICATION: {data}")
-
     if not data:
         return "OK", 200
 
@@ -184,7 +160,6 @@ def payment_notification():
 
     sign_data = {k: v for k, v in data.items() if k != "Token"}
     generated_token = generate_token(sign_data, PASSWORD)
-
     if received_token != generated_token:
         logger.warning("❌ INVALID TOKEN")
         return "OK", 200
@@ -192,24 +167,24 @@ def payment_notification():
     status = data.get("Status")
     order_id = data.get("OrderId")
 
-    if not order_id or order_id not in orders:
-        logger.warning(f"❌ Order {order_id} not found")
-        return "OK", 200
-
     if status == "CONFIRMED":
-        order_info = orders[order_id]
-        order = order_info["data"]
-
-        if not order:
-            logger.warning("Order data is empty")
+        # Получаем заказ из Redis
+        order_raw = r.get(f"order:{order_id}")
+        if not order_raw:
+            logger.warning(f"❌ Order {order_id} not found in Redis")
             return "OK", 200
 
-        # Получаем Telegram-данные из sendData (сохранены ранее)
-        tg_info = pending_requests.pop(order_id, None)
-        if tg_info:
+        order_info = json.loads(order_raw)
+        order = order_info["data"]
+
+        # Получаем Telegram-идентификатор из Redis
+        identity_raw = r.get(f"identity:{order_id}")
+        if identity_raw:
+            tg_info = json.loads(identity_raw)
             telegram_id = tg_info["chat_id"]
             tg_username = "@" + \
                 tg_info["username"] if tg_info["username"] else None
+            r.delete(f"identity:{order_id}")  # одноразовое использование
         else:
             customer = order.get("customer", {})
             telegram_id = customer.get("telegram_id")
@@ -228,20 +203,15 @@ def payment_notification():
             [f"• {p.get('position')}: {p.get('name')}" for p in players]
         )
 
-        # Сообщение клиенту
+        # Сообщения
         client_markup = InlineKeyboardMarkup()
         client_markup.add(InlineKeyboardButton(
-            "📩 Написать в поддержку",
-            url="https://t.me/kylo_gg"
-        ))
-
+            "📩 Написать в поддержку", url="https://t.me/kylo_gg"))
         client_message = (
             f"✅ Заказ №{order_id} успешно оплачен!\n\n"
             f"📩 При возникновении вопросов напишите в поддержку.\n\n"
             f"Спасибо за выбор Fantasy XI 🫶"
         )
-
-        # Сообщение админу
         admin_message = (
             f"📦 <b>Новый заказ №{order_id}</b>\n\n"
             f"📅 {order.get('order_date', '—')}\n"
@@ -254,7 +224,7 @@ def payment_notification():
             f"{players_text}"
         )
 
-        # Отправка клиенту с подробным логом ошибки
+        # Отправка клиенту
         if telegram_id:
             try:
                 sent = bot.send_message(
@@ -271,7 +241,8 @@ def payment_notification():
         if ADMIN_CHAT_ID:
             safe_send_message(ADMIN_CHAT_ID, admin_message, parse_mode="HTML")
 
-        orders.pop(order_id, None)
+        # Удаляем заказ из Redis
+        r.delete(f"order:{order_id}")
 
     return "OK", 200
 
@@ -295,18 +266,18 @@ def get_config():
 def process_webapp_data(message):
     try:
         data = json.loads(message['web_app_data']['data'])
-        if "order_id" in data:
-            order_id = str(data["order_id"])
+        order_id = str(data.get("order_id"))
+        if order_id:
             chat_id = message['chat']['id']
             from_user = message.get('from', {})
-            pending_requests[order_id] = {
+            identity = {
                 "chat_id": chat_id,
                 "username": from_user.get("username")
             }
+            # Сохраняем в Redis на 30 минут
+            r.setex(f"identity:{order_id}", 1800, json.dumps(identity))
             logger.info(
-                f"📌 Saved Telegram identity for order {order_id}: {pending_requests[order_id]}")
-        else:
-            logger.warning("Received web_app_data without order_id")
+                f"📌 Saved identity in Redis for order {order_id}: {identity}")
     except Exception as e:
         logger.error(f"❌ web_app_data error: {e}")
 
@@ -316,15 +287,12 @@ def process_start(message):
         chat_id = message['chat']['id']
         markup = ReplyKeyboardMarkup(resize_keyboard=True)
         web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/")
-        button = KeyboardButton(
-            text="⚽ Открыть конструктор",
-            web_app=web_app
-        )
+        button = KeyboardButton(text="⚽ Открыть конструктор", web_app=web_app)
         markup.add(button)
         safe_send_message(
             chat_id,
             "👋 Привет!\n\n"
-            "Добро пожаловать в Fantasy XI - бот для создания футбольных составов.\n\n"
+            "Добро пожаловать в Fantasy Constructor - бот для создания футбольных составов.\n\n"
             "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду.",
             reply_markup=markup
         )

@@ -38,6 +38,7 @@ pyTelegramBotAPI==4.20.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-socks==2.8.1
+redis==7.4.0
 requests==2.33.1
 six==1.17.0
 typing-inspection==0.4.2
