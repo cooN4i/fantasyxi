@@ -409,19 +409,8 @@
             const selectorTitle = document.getElementById('selectorTitle');
             const closeSelector = document.getElementById('closeSelector');
             const orderButton = document.getElementById('orderButton');
-            function isTelegram() {
-                const tg = window.Telegram?.WebApp;
-
-                return !!(
-                    tg &&
-                    tg.initData &&
-                    tg.initDataUnsafe &&
-                    tg.initDataUnsafe.user
-                );
-            }
-
-            const isTelegramMiniApp = isTelegram();
-
+            const isTelegramMiniApp = !!(window.Telegram && Telegram.WebApp);
+            
             // ========== ПОКАЗ ЭКРАНОВ ==========
             function showScreen(screenName) {
                 constructorScreen.classList.remove('active');
@@ -803,30 +792,13 @@
 
             // ========== ЗАПУСК ==========
             (async function main() {
-
-                const waitForTelegram = () =>
-                    new Promise(resolve => {
-                        const check = () => {
-                            if (window.Telegram?.WebApp) return resolve();
-                            setTimeout(check, 50);
-                        };
-                        check();
-                    });
-
-                await waitForTelegram();
-
-                const tg = window.Telegram.WebApp;
-
-                if (!tg || !tg.initData) {
+                if (!isTelegramMiniApp) {
+                    // Обычный браузер – показываем только заглушку
                     showScreen('notTelegram');
-                    return;
+                    return; // ничего больше не делаем
                 }
-
-                tg.ready();
-
                 await loadConfig();
                 await loadTeamData();
-
             })();
         })();
     </script>
