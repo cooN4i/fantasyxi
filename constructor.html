@@ -409,7 +409,34 @@
             const selectorTitle = document.getElementById('selectorTitle');
             const closeSelector = document.getElementById('closeSelector');
             const orderButton = document.getElementById('orderButton');
-            const isTelegramMiniApp = !!(window.Telegram && Telegram.WebApp);
+
+
+            function waitForInitData() {
+                return new Promise((resolve) => {
+                    if (window.Telegram?.WebApp?.initData?.length) {
+                        resolve(true);
+                        return;
+                    }
+                    if (!window.Telegram?.WebApp) {
+                        resolve(false);
+                        return;
+                    }
+                    // Ждём максимум 1 секунду
+                    let attempts = 0;
+                    const check = setInterval(() => {
+                        if (Telegram.WebApp.initData?.length) {
+                            clearInterval(check);
+                            resolve(true);
+                        }
+                        attempts++;
+                        if (attempts > 10) {
+                            clearInterval(check);
+                            resolve(false);
+                        }
+                    }, 100);
+                });
+            }
+
             
             // ========== ПОКАЗ ЭКРАНОВ ==========
             function showScreen(screenName) {
@@ -792,10 +819,13 @@
 
             // ========== ЗАПУСК ==========
             (async function main() {
-                if (!isTelegramMiniApp) {
-                    // Обычный браузер – показываем только заглушку
+                const isMiniApp = await waitForInitData();
+                if (!isMiniApp) {
                     showScreen('notTelegram');
-                    return; // ничего больше не делаем
+                    return;
+                }
+                if (window.Telegram?.WebApp) {
+                    Telegram.WebApp.ready();
                 }
                 await loadConfig();
                 await loadTeamData();
