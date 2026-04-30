@@ -68,53 +68,24 @@
     </div>
 
     <script>
-        // Проверяем, открыто ли в Mini App
+        // Диагностика
         const urlParams = new URLSearchParams(window.location.search);
-        const hasTgData = urlParams.get('tgWebAppData') || 
-                        (window.Telegram?.WebApp?.initData?.length > 0);
-
-        if (!hasTgData) {
-            // Не Mini App — показываем заглушку
-            document.body.innerHTML = `
-                <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:20px;">
-                    <div style="background:white;padding:32px;border-radius:20px;max-width:320px;width:90%;">
-                        <h2>⚽ Fantasy XI</h2>
-                        <p>Пожалуйста, откройте сервис через Telegram-бота <strong>@fantasyxi_bot</strong></p>
-                    </div>
-                </div>`;
-            // Останавливаем выполнение
-            throw new Error('Not Mini App');
-        }
-
-        // Дальше только для Mini App
-        if (window.Telegram && Telegram.WebApp) {
-            Telegram.WebApp.ready();
-            Telegram.WebApp.expand();
-
-            const platform = Telegram.WebApp.platform || '';
-            if (platform === 'web') {
-                alert('❌ Заказ можно оформить только через мобильное или десктопное приложение Telegram!\n\nПожалуйста, откройте бота в приложении (не в браузере).');
-                Telegram.WebApp.close();
-            }
-        }
-
-        const cards = document.querySelectorAll('.team-card');
-        cards.forEach(card => {
-            card.addEventListener('click', () => {
-                const team = card.dataset.team;
-                // Прокидываем tgWebAppData на следующую страницу
-                const currentParams = window.location.search;
-                window.location.href = `constructor.html${currentParams}&team=${encodeURIComponent(team)}`;
-            });
-        });
-
-        document.addEventListener('gesturestart', function (e) {
-            e.preventDefault();
-        });
-
-        document.addEventListener('dblclick', function (e) {
-            e.preventDefault();
-        });
+        const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+        
+        document.body.innerHTML = `
+            <div style="padding:20px;font-family:monospace;background:white;max-width:600px;margin:20px auto;border-radius:12px;">
+                <h2>🔍 Диагностика index.html</h2>
+                <p><b>window.Telegram:</b> ${typeof window.Telegram}</p>
+                <p><b>window.Telegram?.WebApp:</b> ${typeof window.Telegram?.WebApp}</p>
+                <p><b>initData:</b> ${window.Telegram?.WebApp?.initData || 'пусто'}</p>
+                <p><b>initDataUnsafe:</b> ${JSON.stringify(window.Telegram?.WebApp?.initDataUnsafe || 'пусто')}</p>
+                <p><b>search:</b> ${window.location.search || 'пусто'}</p>
+                <p><b>hash:</b> ${window.location.hash || 'пусто'}</p>
+                <p><b>href:</b> ${window.location.href}</p>
+                <hr>
+                <p><b>tgWebAppData в search:</b> ${urlParams.get('tgWebAppData') || 'НЕТ'}</p>
+                <p><b>tgWebAppData в hash:</b> ${hashParams.get('tgWebAppData') || 'НЕТ'}</p>
+            </div>`;
     </script>
 </body>
 </html>
