@@ -376,7 +376,7 @@
 
     <script>
         (function() {
-            const isTelegramMiniApp = !!(window.Telegram?.WebApp);
+            const isTelegramMiniApp = !!(window.Telegram?.WebApp?.initData?.length);
             if (isTelegramMiniApp) {
                 Telegram.WebApp.ready();
             }
