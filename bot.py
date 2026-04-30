@@ -99,7 +99,7 @@ def init_payment():
 
     logger.info(f"Order data received: {order_data}")
 
-    order_id = str(random.randint(1, 15000))
+    order_id = str(random.randint(1, 30000))
     AMOUNT = 1000
 
     payload = {
