@@ -69,8 +69,7 @@ telebot.apihelper.session = session
 
 # ========== ХРАНЕНИЕ ЗАКАЗОВ ==========
 orders = {}
-# Хранит данные о пользователе, полученные через sendData: order_id -> {"chat_id": ..., "username": ...}
-pending_requests = {}
+pending_requests = {}  # order_id -> {"chat_id": ..., "username": ...}
 
 # ========== HELPERS ==========
 
@@ -119,8 +118,6 @@ def init_payment():
     order_data = body.get("order_data")
 
     logger.info(f"Order data received: {order_data}")
-    logger.info(
-        f"Customer ID (in order_data): {order_data.get('customer', {}).get('telegram_id')}")
 
     order_id = str(random.randint(1, 15000))
     AMOUNT = 1000  # копейки
@@ -185,13 +182,8 @@ def payment_notification():
         logger.warning("❌ No Token in notification")
         return "OK", 200
 
-    # Исключаем Token из данных для подписи
     sign_data = {k: v for k, v in data.items() if k != "Token"}
     generated_token = generate_token(sign_data, PASSWORD)
-
-    logger.info(f"Received token: {received_token}")
-    logger.info(f"Generated token: {generated_token}")
-    logger.info(f"Sign data: {sign_data}")
 
     if received_token != generated_token:
         logger.warning("❌ INVALID TOKEN")
@@ -200,26 +192,25 @@ def payment_notification():
     status = data.get("Status")
     order_id = data.get("OrderId")
 
-    logger.info(f"Current orders keys: {list(orders.keys())}")
     if not order_id or order_id not in orders:
         logger.warning(f"❌ Order {order_id} not found")
         return "OK", 200
 
     if status == "CONFIRMED":
-        order = orders[order_id]["data"]
+        order_info = orders[order_id]
+        order = order_info["data"]
 
         if not order:
             logger.warning("Order data is empty")
             return "OK", 200
 
-        # Пытаемся получить реальные Telegram данные из pending_requests
+        # Получаем Telegram-данные из sendData (сохранены ранее)
         tg_info = pending_requests.pop(order_id, None)
         if tg_info:
             telegram_id = tg_info["chat_id"]
             tg_username = "@" + \
                 tg_info["username"] if tg_info["username"] else None
         else:
-            # Запасной вариант из заказа (на случай, если sendData не сработал)
             customer = order.get("customer", {})
             telegram_id = customer.get("telegram_id")
             tg_username = customer.get("telegram")
@@ -237,7 +228,21 @@ def payment_notification():
             [f"• {p.get('position')}: {p.get('name')}" for p in players]
         )
 
-        message_text = (
+        # Сообщение клиенту
+        client_markup = InlineKeyboardMarkup()
+        client_markup.add(InlineKeyboardButton(
+            "📩 Написать в поддержку",
+            url="https://t.me/kylo_gg"
+        ))
+
+        client_message = (
+            f"✅ Заказ №{order_id} успешно оплачен!\n\n"
+            f"📩 При возникновении вопросов напишите в поддержку.\n\n"
+            f"Спасибо за выбор Fantasy XI 🫶"
+        )
+
+        # Сообщение админу
+        admin_message = (
             f"📦 <b>Новый заказ №{order_id}</b>\n\n"
             f"📅 {order.get('order_date', '—')}\n"
             f"⚽ {order.get('team', '—')}\n\n"
@@ -249,15 +254,23 @@ def payment_notification():
             f"{players_text}"
         )
 
-        # Отправляем пользователю
+        # Отправка клиенту с подробным логом ошибки
         if telegram_id:
-            safe_send_message(telegram_id, message_text, parse_mode="HTML")
+            try:
+                sent = bot.send_message(
+                    telegram_id, client_message, parse_mode="HTML", reply_markup=client_markup)
+                logger.info(
+                    f"✅ Sent to user {telegram_id}: message_id={sent.message_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to send to user {telegram_id}: {e}")
+                if ADMIN_CHAT_ID:
+                    safe_send_message(
+                        ADMIN_CHAT_ID, f"⚠️ Не удалось отправить сообщение клиенту {telegram_id}: {e}")
 
-        # Отправляем админу
+        # Отправка админу
         if ADMIN_CHAT_ID:
-            safe_send_message(ADMIN_CHAT_ID, message_text, parse_mode="HTML")
+            safe_send_message(ADMIN_CHAT_ID, admin_message, parse_mode="HTML")
 
-        # Удаляем заказ
         orders.pop(order_id, None)
 
     return "OK", 200
@@ -281,12 +294,10 @@ def get_config():
 
 def process_webapp_data(message):
     try:
-        chat_id = message['chat']['id']
         data = json.loads(message['web_app_data']['data'])
-
-        # Новый сценарий: пришёл только order_id для связывания пользователя
-        if "order_id" in data and "team" not in data:
+        if "order_id" in data:
             order_id = str(data["order_id"])
+            chat_id = message['chat']['id']
             from_user = message.get('from', {})
             pending_requests[order_id] = {
                 "chat_id": chat_id,
@@ -294,68 +305,8 @@ def process_webapp_data(message):
             }
             logger.info(
                 f"📌 Saved Telegram identity for order {order_id}: {pending_requests[order_id]}")
-            # Никакого ответа пользователю не отправляем – просто сохраняем
-            return
-
-        # Обычная полная отправка заказа (старый путь, оставлен для совместимости)
-        order_id = data.get("order_id", "—")
-        order_date = data.get("order_date", "—")
-        team = data.get("team", "—")
-        customer = data.get("customer", {})
-        players = data.get("players", [])
-
-        from_user = message.get('from', {})
-
-        tg_id = customer.get("telegram_id") or chat_id
-        tg_username = customer.get("telegram") or (
-            "@" + from_user.get("username")
-            if from_user.get("username") else None
-        )
-
-        customer_text = (
-            f"{customer.get('surname', '')} "
-            f"{customer.get('name', '')} "
-            f"{customer.get('patronymic', '')}"
-        ).strip()
-
-        players_text = "\n".join(
-            [f"• {p.get('position')}: {p.get('name')}" for p in players]
-        )
-
-        admin_message = (
-            f"📦 <b>Новый заказ №{order_id}</b>\n\n"
-            f"📅 {order_date}\n"
-            f"⚽ {team}\n\n"
-            f"👤 {customer_text}\n"
-            f"📱 {tg_username or '—'}\n"
-            f"🆔 {tg_id}\n"
-            f"📞 {customer.get('phone', '—')}\n"
-            f"📍 {customer.get('address', '—')}\n\n"
-            f"{players_text}"
-        )
-
-        if ADMIN_CHAT_ID:
-            safe_send_message(
-                ADMIN_CHAT_ID,
-                admin_message,
-                parse_mode="HTML"
-            )
-
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton(
-            "📩 Написать в поддержку",
-            url="https://t.me/kylo_gg"
-        ))
-
-        safe_send_message(
-            chat_id,
-            f"✅ Заказ №{order_id} успешно оформлен!\n\n"
-            f"📩 При возникновении вопросов напишите в поддержку.\n\n"
-            f"Спасибо за выбор Fantasy XI 🫶",
-            parse_mode="HTML",
-            reply_markup=markup
-        )
-
+        else:
+            logger.warning("Received web_app_data without order_id")
     except Exception as e:
         logger.error(f"❌ web_app_data error: {e}")
 
@@ -363,7 +314,6 @@ def process_webapp_data(message):
 def process_start(message):
     try:
         chat_id = message['chat']['id']
-
         markup = ReplyKeyboardMarkup(resize_keyboard=True)
         web_app = WebAppInfo(url="https://fantasyxi.abrdns.com/")
         button = KeyboardButton(
@@ -371,15 +321,13 @@ def process_start(message):
             web_app=web_app
         )
         markup.add(button)
-
         safe_send_message(
             chat_id,
             "👋 Привет!\n\n"
-            "Добро пожаловать в Fantasy Constructor - бот для создания футбольных составов.\n\n"
+            "Добро пожаловать в Fantasy XI - бот для создания футбольных составов.\n\n"
             "⬇️ Нажми на кнопку, чтобы открыть конструктор и собрать свою команду.",
             reply_markup=markup
         )
-
     except Exception as e:
         logger.error(f"❌ start error: {e}")
 
@@ -388,9 +336,7 @@ def process_unknown_message(message):
     try:
         chat_id = message['chat']['id']
         safe_send_message(
-            chat_id,
-            "Используйте кнопку меню или команду /start для начала работы"
-        )
+            chat_id, "Используйте кнопку меню или команду /start для начала работы")
     except Exception as e:
         logger.error(f"❌ unknown message error: {e}")
 
@@ -400,12 +346,10 @@ def process_unknown_message(message):
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update_json = request.get_json(silent=True)
-
     if not update_json:
         return jsonify({'ok': True})
 
     logger.info("🔥 WEBHOOK RECEIVED")
-
     message = update_json.get('message')
     if not message:
         return jsonify({'ok': True})
