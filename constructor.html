@@ -378,7 +378,7 @@
                 phone: '', address: '', order_id: null
             };
             const customerData = window.customerData;
-
+            
             const constructorScreen = document.getElementById('constructorScreen');
             const formScreen = document.getElementById('formScreen');
             const reviewScreen = document.getElementById('reviewScreen');
@@ -681,9 +681,6 @@
                 if (paymentInProgress) return;
                 paymentInProgress = true;
 
-                // Генерируем уникальный идентификатор запроса (request_id)
-                const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2);
-
                 // Формируем полный объект заказа (без telegram данных)
                 const composition = {
                     team: team,
@@ -709,40 +706,41 @@
                     }
                 });
 
-                // Шаг 1: отправляем боту только request_id для получения Telegram-идентификатора
-                try {
-                    Telegram.WebApp.sendData(JSON.stringify({ request_id: requestId }));
-                } catch (e) {
-                    alert('Ошибка связи с ботом');
-                    paymentInProgress = false;
-                    return;
-                }
-
-                // Шаг 2: сразу инициируем платёж, передавая тот же request_id
+                // Шаг 1: инициируем платёж и получаем PaymentURL и order_id
                 try {
                     const resp = await fetch('https://fantasyxi.abrdns.com/init-payment', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             phone: customerData.phone,
-                            request_id: requestId,
                             order_data: composition
                         })
                     });
                     const data = await resp.json();
                     if (!data.PaymentURL || !data.order_id) throw new Error('Invalid response');
 
-                    // Сохраняем order_id в заказе (для истории, если нужно)
-                    composition.order_id = data.order_id;
-                    sessionStorage.setItem('pendingOrder', JSON.stringify(composition));
+                    const paymentURL = data.PaymentURL;
+                    const orderId = data.order_id;
 
-                    // Открываем платёжную ссылку
+                    // Шаг 2: открываем платёжную ссылку (WebApp остаётся открыт)
                     if (window.Telegram && Telegram.WebApp) {
-                        Telegram.WebApp.openLink(data.PaymentURL, { try_instant_view: false });
+                        Telegram.WebApp.openLink(paymentURL, { try_instant_view: false });
                     } else {
-                        window.open(data.PaymentURL, '_blank');
+                        window.open(paymentURL, '_blank');
                     }
 
+                    // Шаг 3: отправляем боту order_id для получения Telegram ID/username
+                    // Этот вызов закроет Mini App, но платёжная страница уже открыта
+                    if (window.Telegram && Telegram.WebApp) {
+                        Telegram.WebApp.sendData(JSON.stringify({ order_id: orderId }));
+                    } else {
+                        alert('Ошибка: Telegram не доступен');
+                        paymentInProgress = false;
+                        return;
+                    }
+
+                    // Показываем экран оплаты (скорее всего не увидим, так как sendData закроет приложение,
+                    // но оставим для совместимости)
                     showScreen('payment');
                     document.getElementById('paymentContainer').innerHTML = `
                         <div style="text-align:center; padding:30px;">

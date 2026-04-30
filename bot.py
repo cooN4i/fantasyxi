@@ -69,7 +69,8 @@ telebot.apihelper.session = session
 
 # ========== ХРАНЕНИЕ ЗАКАЗОВ ==========
 orders = {}
-pending_requests = {}  # request_id -> {"chat_id": ..., "username": ...}
+# Хранит данные о пользователе, полученные через sendData: order_id -> {"chat_id": ..., "username": ...}
+pending_requests = {}
 
 # ========== HELPERS ==========
 
@@ -116,10 +117,10 @@ def init_payment():
     success_url = body.get("success_url")
     fail_url = body.get("fail_url")
     order_data = body.get("order_data")
-    request_id = body.get("request_id")  # новый параметр
 
     logger.info(f"Order data received: {order_data}")
-    logger.info(f"Request ID: {request_id}")
+    logger.info(
+        f"Customer ID (in order_data): {order_data.get('customer', {}).get('telegram_id')}")
 
     order_id = str(random.randint(1, 15000))
     AMOUNT = 1000  # копейки
@@ -158,10 +159,9 @@ def init_payment():
 
         orders[order_id] = {
             "status": "pending",
-            "data": order_data,
-            "request_id": request_id   # сохраняем для последующей привязки
+            "data": order_data
         }
-        logger.info(f"Order {order_id} created with request_id {request_id}")
+        logger.info(f"Order {order_id} created")
         return jsonify({
             "PaymentURL": data.get("PaymentURL"),
             "order_id": order_id
@@ -191,6 +191,7 @@ def payment_notification():
 
     logger.info(f"Received token: {received_token}")
     logger.info(f"Generated token: {generated_token}")
+    logger.info(f"Sign data: {sign_data}")
 
     if received_token != generated_token:
         logger.warning("❌ INVALID TOKEN")
@@ -205,19 +206,20 @@ def payment_notification():
         return "OK", 200
 
     if status == "CONFIRMED":
-        order_info = orders[order_id]
-        order = order_info["data"]
-        request_id = order_info.get("request_id")
+        order = orders[order_id]["data"]
 
-        # Получаем реальные Telegram-данные из временного хранилища
-        tg_info = pending_requests.pop(
-            request_id, None) if request_id else None
+        if not order:
+            logger.warning("Order data is empty")
+            return "OK", 200
+
+        # Пытаемся получить реальные Telegram данные из pending_requests
+        tg_info = pending_requests.pop(order_id, None)
         if tg_info:
             telegram_id = tg_info["chat_id"]
             tg_username = "@" + \
                 tg_info["username"] if tg_info["username"] else None
         else:
-            # Запасной вариант (на случай, если данные не были получены)
+            # Запасной вариант из заказа (на случай, если sendData не сработал)
             customer = order.get("customer", {})
             telegram_id = customer.get("telegram_id")
             tg_username = customer.get("telegram")
@@ -282,20 +284,20 @@ def process_webapp_data(message):
         chat_id = message['chat']['id']
         data = json.loads(message['web_app_data']['data'])
 
-        # Новый сценарий: получен только request_id для идентификации
-        if "request_id" in data and "team" not in data:
-            request_id = data["request_id"]
+        # Новый сценарий: пришёл только order_id для связывания пользователя
+        if "order_id" in data and "team" not in data:
+            order_id = str(data["order_id"])
             from_user = message.get('from', {})
-            pending_requests[request_id] = {
+            pending_requests[order_id] = {
                 "chat_id": chat_id,
                 "username": from_user.get("username")
             }
             logger.info(
-                f"📌 Saved Telegram identity for request {request_id}: {pending_requests[request_id]}")
-            # Пользователю ничего не отвечаем, чтобы не сбивать с толку
+                f"📌 Saved Telegram identity for order {order_id}: {pending_requests[order_id]}")
+            # Никакого ответа пользователю не отправляем – просто сохраняем
             return
 
-        # Обычная полная отправка заказа (на случай, если кто-то решит использовать старый способ)
+        # Обычная полная отправка заказа (старый путь, оставлен для совместимости)
         order_id = data.get("order_id", "—")
         order_date = data.get("order_date", "—")
         team = data.get("team", "—")
