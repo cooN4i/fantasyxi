@@ -376,13 +376,7 @@
 
     <script>
         (function() {
-            // const tg = window.Telegram?.WebApp;
 
-            // const isTelegramMiniApp = !!(
-            //     tg &&
-            //     tg.initData &&
-            //     tg.initData.length > 0
-            // );
             
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
@@ -411,32 +405,27 @@
             const orderButton = document.getElementById('orderButton');
 
 
-            function waitForInitData() {
-                return new Promise((resolve) => {
-                    if (window.Telegram?.WebApp?.initData?.length) {
-                        resolve(true);
-                        return;
-                    }
-                    if (!window.Telegram?.WebApp) {
-                        resolve(false);
-                        return;
-                    }
-                    // Ждём максимум 1 секунду
-                    let attempts = 0;
-                    const check = setInterval(() => {
-                        if (Telegram.WebApp.initData?.length) {
-                            clearInterval(check);
-                            resolve(true);
-                        }
-                        attempts++;
-                        if (attempts > 10) {
-                            clearInterval(check);
-                            resolve(false);
-                        }
-                    }, 100);
-                });
-            }
+            const urlParamss = new URLSearchParams(window.location.search);
+            const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+            
+            const hasTgData = urlParamss.get('tgWebAppData') || 
+                            hashParams.get('tgWebAppData') ||
+                            (window.Telegram?.WebApp?.initData?.length > 0);
 
+            if (!hasTgData) {
+                // Точно не Mini App — показываем заглушку и СРАЗУ останавливаемся
+                document.getElementById('app').innerHTML = `
+                    <div id="notTelegramScreen" class="screen active" style="display:flex;align-items:center;justify-content:center;text-align:center;">
+                        <div style="background:white;padding:32px;border-radius:20px;max-width:320px;width:90%;">
+                            <h2>⚽ Fantasy XI</h2>
+                            <p>Пожалуйста, откройте сервис через Telegram-бота <strong>@fantasyxi_bot</strong></p>
+                        </div>
+                    </div>`;
+                return; // Полностью останавливаем выполнение
+            }
+            if (window.Telegram?.WebApp) {
+                Telegram.WebApp.ready();
+            }
             
             // ========== ПОКАЗ ЭКРАНОВ ==========
             function showScreen(screenName) {
@@ -819,14 +808,6 @@
 
             // ========== ЗАПУСК ==========
             (async function main() {
-                const isMiniApp = await waitForInitData();
-                if (!isMiniApp) {
-                    showScreen('notTelegram');
-                    return;
-                }
-                if (window.Telegram?.WebApp) {
-                    Telegram.WebApp.ready();
-                }
                 await loadConfig();
                 await loadTeamData();
             })();
