@@ -413,15 +413,21 @@
                             (window.Telegram?.WebApp?.initData?.length > 0);
 
             if (!hasTgData) {
-                // Точно не Mini App — показываем заглушку и СРАЗУ останавливаемся
+                // Выводим диагностику перед показом заглушки
                 document.getElementById('app').innerHTML = `
-                    <div id="notTelegramScreen" class="screen active" style="display:flex;align-items:center;justify-content:center;text-align:center;">
-                        <div style="background:white;padding:32px;border-radius:20px;max-width:320px;width:90%;">
-                            <h2>⚽ Fantasy XI</h2>
-                            <p>Пожалуйста, откройте сервис через Telegram-бота <strong>@fantasyxi_bot</strong></p>
-                        </div>
+                    <div style="padding:20px;font-family:monospace;background:white;max-width:600px;margin:20px auto;border-radius:12px;">
+                        <h2>🔍 Диагностика</h2>
+                        <p><b>window.Telegram:</b> ${typeof window.Telegram}</p>
+                        <p><b>window.Telegram?.WebApp:</b> ${typeof window.Telegram?.WebApp}</p>
+                        <p><b>initData:</b> ${window.Telegram?.WebApp?.initData || 'пусто'}</p>
+                        <p><b>initDataUnsafe:</b> ${JSON.stringify(window.Telegram?.WebApp?.initDataUnsafe || 'пусто')}</p>
+                        <p><b>search:</b> ${window.location.search || 'пусто'}</p>
+                        <p><b>hash:</b> ${window.location.hash || 'пусто'}</p>
+                        <p><b>href:</b> ${window.location.href}</p>
+                        <hr>
+                        <p style="color:red;">❌ Не Mini App — нужен tgWebAppData</p>
                     </div>`;
-                return; // Полностью останавливаем выполнение
+                return;
             }
             if (window.Telegram?.WebApp) {
                 Telegram.WebApp.ready();
