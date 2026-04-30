@@ -376,7 +376,7 @@
 
     <script>
         (function() {
-            const isTelegramMiniApp = !!(window.Telegram?.WebApp?.initDataUnsafe?.user?.id);
+            const isTelegramMiniApp = !!(window.location.search.includes('tgWebAppData') || (window.Telegram?.WebApp?.initDataUnsafe?.user?.id));
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
@@ -785,12 +785,12 @@
 
             // ========== ЗАПУСК ==========
             (async function main() {
-                await loadConfig();
                 if (!isTelegramMiniApp) {
                     // Обычный браузер – показываем только заглушку
                     showScreen('notTelegram');
                     return; // ничего больше не делаем
                 }
+                await loadConfig();
                 await loadTeamData();
             })();
         })();
