@@ -376,10 +376,10 @@
 
     <script>
         (function() {
-            if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
-            const isTelegramMiniApp = !!( (window.Telegram?.WebApp?.initData?.length > 0) ||
-                              window.location.search.includes('tgWebAppData') ||
-                              window.location.hash.includes('tgWebAppData') );
+            const isTelegramMiniApp = !!(window.Telegram?.WebApp);
+            if (isTelegramMiniApp) {
+                Telegram.WebApp.ready();
+            }
             
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
