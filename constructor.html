@@ -507,17 +507,23 @@
             }
 
             function getTelegramUser() {
-                // Используем сохранённые значения в первую очередь
-                if (storedTelegramId) {
-                    return {
-                        id: storedTelegramId,
-                        username: storedTelegramUsername
-                    };
+                // Пробуем взять из init_data
+                let user = null;
+                if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
+                    user = Telegram.WebApp.initDataUnsafe.user;
                 }
-                // fallback на прямые данные (на случай, если появятся)
-                if (!window.Telegram || !Telegram.WebApp) return null;
-                const unsafe = Telegram.WebApp.initDataUnsafe;
-                return unsafe?.user || null;
+                // Fallback: сохранённые значения в sessionStorage
+                if (!user || !user.id) {
+                    const storedId = sessionStorage.getItem('tg_id');
+                    const storedUsername = sessionStorage.getItem('tg_username');
+                    if (storedId) {
+                        user = {
+                            id: Number(storedId),
+                            username: storedUsername || null
+                        };
+                    }
+                }
+                return user || null;
             }
 
             // Эта функция больше не вызывается из платёжного потока
