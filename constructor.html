@@ -376,8 +376,11 @@
 
     <script>
         (function() {
-            const isTelegramMiniApp = !!(window.location.search.includes('tgWebAppData') || (window.Telegram?.WebApp?.initDataUnsafe?.user?.id));
             if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready();
+            const isTelegramMiniApp = !!( (window.Telegram?.WebApp?.initData?.length > 0) ||
+                              window.location.search.includes('tgWebAppData') ||
+                              window.location.hash.includes('tgWebAppData') );
+            
 
             // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
             let backendConfig = null;
